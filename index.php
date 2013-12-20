@@ -226,6 +226,35 @@ abstract class page{
 	}
 	private static function getFooter(){
 		global $queryNum;
+		$loginScript = '';
+		if(isset($_COOKIE['shouldlogin']) && $_COOKIE['shouldlogin']=='true' && $_SESSION['id']==false){
+			$loginScript = implode([
+				'<script type="text/javascript" src="/jsencrypt.min.js"></script>',
+				'<script type="text/javascript">',
+					'$.getJSON("/getKeys").done(function(keys){',
+						'var encrypt = new JSEncrypt();',
+						'encrypt.setPublicKey(atob(keys.hash.key));',
+						'pwdenc = encrypt.encrypt(localStorage.getItem("longtimePwd"));',
+						'$.post("/account/verifyLogin?ltpwdv",{',
+							'pwd:pwdenc,',
+							'id:keys.hash.id,',
+							'fkey:keys.form.key,',
+							'fid:keys.form.id,',
+							'uid:localStorage.getItem("id")',
+						'}).done(function(data){',
+							'if(data.success){',
+								'document.cookie="session-id="+escape(data.sessid)+"; path=/";',
+								'location.reload();',
+							'}else{',
+								'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
+								'localStorage.removeItem("longtimePwd");',
+								'localStorage.removeItem("id");',
+							'}',
+						'})',
+					'});',
+				'</script>'
+			],'');
+		}
 		return implode([
 					'</div>',
 					'<script type="text/javascript">',
@@ -258,6 +287,7 @@ abstract class page{
 						'}',
 						'parseLinks();',
 					'</script>',
+					$loginScript,
 				'</body>',
 			'</html>'],'');
 	}
@@ -361,9 +391,15 @@ abstract class page{
 if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<strpos($_SERVER['REQUEST_URI'],'?')){
 	$_GET['path'] .= 'index.php';
 }
-
 if($_SESSION['id']!==false){
-	$user_info = sql::query("SELECT name,settings,power FROM users WHERE id='%s'",[$_SESSION['id']],0);
+	$user_info = sql::query("SELECT session,name,settings,power FROM users WHERE id='%s'",[$_SESSION['id']],0);
+	if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$user_info['session']){
+		$_SESSION['id'] = false;
+		unset($user_info);
+	}
+}
+if(isset($_COOKIE['shouldlogin'])){
+	setcookie('shouldlogin', $_COOKIE['shouldlogin'], time()+3600*24*30,'/');
 }
 $fullPath=str_replace(' ','+',$_GET['path']);
 $pathParts = explode('/',$fullPath);
@@ -407,19 +443,66 @@ switch($pathPartsParsed[0]){
 				case 'logout':
 					$_SESSION['id'] = false;
 					session_destroy();
-					echo page::getPage('Log Out','You are now logged out.',$lang,$pathPartsParsed);
+					echo page::getPage('Log Out',implode([
+						'You are now logged out.',
+						'<script type="text/javascript">',
+							'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
+							'document.cookie="session-id=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
+							'localStorage.removeItem("longtimePwd");',
+							'localStorage.removeItem("id");',
+						'</script>'
+					],''),$lang,$pathPartsParsed);
 					break;
 				case 'verifyLogin':
 					header('Content-type: text/json');
-					if(!isset($_POST['name']) || !isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fkey']) || !isset($_POST['fid']))
-						die('{"success":false,"message":"ERROR: Missing required field"}');
-					$user = sql::query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
-					if(!isset($user['id']))
-						die('{"success":false,"message":"ERROR: User doesn\'t exist!"}');
-					if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
-						die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
-					$_SESSION['id'] = $user['id'];
-					echo '{"success":true,"message":"Success"}';
+					if(isset($_GET['ltpwdv'])){
+						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']) || !isset($_POST['uid']))
+							die('{"success":false}');
+						$user = sql::query("SELECT id,power,longtimepwd,longtimesalt FROM users WHERE id='%s'",[$_POST['uid']],0);
+						if(!isset($user['id']))
+							die('{"success":false}');
+						if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['longtimesalt'],$user['longtimepwd'],$_POST['fid'],$_POST['fkey']))
+							die('{"success":false}');
+						$_SESSION['id'] = $user['id'];
+						$session_id = security::generateRandomString(50);
+						sql::query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						echo json_encode([
+							'success' => true,
+							'sessid' => $session_id
+						]);
+					}elseif(isset($_GET['ltpwd'])){
+						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']))
+							die('{"success":false,"message":"ERROR: Missing required field"}');
+						if($_SESSION['id']===false)
+							die('{"success":false,"message":"ERROR: Not logged in"}');
+						if(!security::validateForm($_POST['fid'],$_POST['fkey']))
+							die('{"success":false,"message":"ERROR: Invalid session, please refresh the page"}');
+						$pwd = security::getPwdFromKey($_POST['id'],$_POST['pwd']);
+						if(strlen($pwd)<1)
+							die('{"success":false,"message":"ERROR: No password entered!"}');
+						$salt = Password::generateSalt(50);
+						$hSalt = Password::hash($salt,$private_salt_key);
+						$hash = Password::hash($pwd,$hSalt);
+						sql::query("UPDATE users SET longtimepwd='%s',longtimesalt='%s' WHERE id='%s'",[$hash,$salt,$_SESSION['id']]);
+						echo '{"success":true,"message":"Success","id":"'.$_SESSION['id'].'"}';
+					}else{
+						if(!isset($_POST['name']) || !isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fkey']) || !isset($_POST['fid']))
+							die('{"success":false,"message":"ERROR: Missing required field"}');
+						$user = sql::query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
+						if(!isset($user['id']))
+							die('{"success":false,"message":"ERROR: User doesn\'t exist!"}');
+						if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
+							die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
+						$_SESSION['id'] = $user['id'];
+						$session_id = security::generateRandomString(50);
+						sql::query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						echo json_encode([
+							'success' => true,
+							'message' => 'Success',
+							'sessid' => $session_id,
+							'id' => $user['id']
+						]);
+					}
 					break;
 				case 'verifyRegister':
 					if(!isset($_POST['name']) || !isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['email']) || !isset($_POST['fkey'])
