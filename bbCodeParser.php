@@ -54,15 +54,17 @@ class bbParserTag {
 }
 class bbParser {
 	private $tags = Array();
+	private $allowedTags = Array();
 	public function returnBB($t,$s,$a) {
 		return $this->tags[0]->returnBB($t,$s,$a,$this);
 	}
 	private function getTagContent($type,$s,$attrs) {
 		$type = strtolower($type);
-		if ($this->tagExists($type))
-			foreach ($this->tags as $tag)
-				if ($tag->isType($type))
-					return $tag->getHTML($type,$s,$attrs,$this);
+		if(($this->allowedTags[0]=='*' && !in_array($type,$this->allowedTags))||($this->allowedTags[0]!='*' && in_array($type,$this->allowedTags)))
+			if($this->tagExists($type))
+				foreach($this->tags as $tag)
+					if($tag->isType($type))
+						return $tag->getHTML($type,$s,$attrs,$this);
 		return $this->returnBB($type,$s,$attrs);
 	}
 	private function getAttributes($s) {
@@ -107,7 +109,13 @@ class bbParser {
 		$this->tags[] = new bbParserTag($type,$function,$attrs,$help);
 		return true;
 	}
-	public function parse($s,$br=true) {
+	public function parse($s,$attr=true) {
+		if(gettype($attr)=='array'){
+			$this->allowedTags = $attr;
+			$br = true;
+		}else{
+			$br = $attr;
+		}
 		preg_match_all('/()\[([a-zA-Z0-9]+)(|=[^\]\[]+)( [^\]\[]+=[^\]\[]+)*\]()/i', $s, $matches, PREG_SET_ORDER | PREG_OFFSET_CAPTURE);
 		$tags = Array();
 		$i = 0;

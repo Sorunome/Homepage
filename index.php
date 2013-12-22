@@ -14,6 +14,8 @@ date_default_timezone_set('UTC');
 Settings:
 1 - display normal page (header, footer etc)
 2 - not be in nav
+4 - enable comments
+8 - enable guest comments
 
 User
 Power
@@ -129,6 +131,9 @@ abstract class security{
 			return 2;
 		return false;
 	}
+	public static function isLoggedIn(){
+		return $_SESSION['id']!==false;
+	}
 }
 function getVar($s){
 	$r = sql::query("SELECT content FROM vars WHERE name='%s'",[$s],0);
@@ -194,102 +199,131 @@ abstract class page{
 	}
 	private static function getHeader($title,$lang,$pathPartsParsed,$headStuff = ''){
 		global $user_info;
-		return implode(['<!DOCTYPE html>',
-			'<html>',
-				'<head>',
-					"<title>$title</title>",
-					$headStuff,
-					'<link rel="stylesheet" type="text/css" href="/style.css">',
-					'<link rel="icon" type="image/png" href="/media/favicon.png">',
-					'<meta http-equiv="content-type" content="text/html; charset=UTF-8">',
-					'<script type="text/javascript" src="/jquery-2.0.3.min.js"></script>',
-				'</head>',
-				'<body>',
-					'<div id="main">',
-					'<table style="margin:0;padding:0;border:none;width:100%;font-size:11px">',
-						'<tr>',
-							'<td style="width:50%;text-align:left"></td>',
-							'<td style="width:50%;text-align:right">',
-								($_SESSION['id']!==false?
+		return '<!DOCTYPE html>'.
+			'<html>'.
+				'<head>'.
+					"<title>$title</title>".
+					$headStuff.
+					'<link rel="stylesheet" type="text/css" href="/style.css">'.
+					'<link rel="icon" type="image/png" href="/media/favicon.png">'.
+					'<meta http-equiv="content-type" content="text/html; charset=UTF-8">'.
+					'<script type="text/javascript" src="/jquery-2.0.3.min.js"></script>'.
+					'<script type="text/javascript" src="/jsencrypt.min.js"></script>'.
+					'<script type="text/javascript">'.
+						'LOGGEDIN='.(security::isLoggedIn()?'true':'false').';'.
+						'function reLogIn(){'.
+							'$.getJSON("/getKeys").done(function(keys){'.
+								'var encrypt = new JSEncrypt();'.
+								'encrypt.setPublicKey(atob(keys.hash.key));'.
+								'pwdenc = encrypt.encrypt(localStorage.getItem("longtimePwd"));'.
+								'$.post("/account/verifyLogin?ltpwdv",{'.
+									'pwd:pwdenc,'.
+									'id:keys.hash.id,'.
+									'fkey:keys.form.key,'.
+									'fid:keys.form.id,'.
+									'uid:localStorage.getItem("id")'.
+								'}).done(function(data){'.
+									'if(data.success){'.
+										'document.cookie="session-id="+escape(data.sessid)+"; path=/";'.
+										'if(LOGGEDIN){'.
+											'getPageJSON(document.URL);'.
+										'}else{'.
+											'location.reload();'.
+										'}'.
+									'}else{'.
+										'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
+										'localStorage.removeItem("longtimePwd");'.
+										'localStorage.removeItem("id");'.
+										'if(LOGGEDIN){'.
+											'location.reload();'.
+										'}'.
+									'}'.
+								'})'.
+							'});'.
+						'}'.
+						'function getPageJSON(url,doHistory){'.
+							'if(doHistory===undefined){'.
+								'doHistory = true;'.
+							'}'.
+							'if(history.pushState){'.
+								'$.getJSON(url+((url.indexOf("?")!=-1)?"&json":"?json")).done(function(page){'.
+									'if(page.relogin){'.
+										'reLogIn();'.
+									'}'.
+									'$("article").html(page.content);'.
+									'$("title").html(page.title);'.
+									'$("#quickLinks").html(page.quickLinks);'.
+									'$("#queryNum").text(page.queries);'.
+									'if(doHistory){'.
+										'history.pushState({},page.title,url);'.
+									'}'.
+									'parseLinks();'.
+								'});'.
+							'}else{'.
+								'window.location=url;'.
+							'}'.
+						'}'.
+						'if(history.pushState){'.
+							'(function($){'.
+								'var firstTime = true;'.
+								'$(window).bind("popstate",function(e){'.
+									'if(!firstTime){'.
+										'getPageJSON(document.URL,false);'.
+									'}else{'.
+										'firstTime = false;'.
+									'}'.
+								'});'.
+							'})(jQuery);'.
+						'}'.
+					'</script>'.
+				'</head>'.
+				'<body>'.
+					'<div id="main">'.
+					'<table style="margin:0;padding:0;border:none;width:100%;font-size:11px">'.
+						'<tr>'.
+							'<td style="width:50%;text-align:left"></td>'.
+							'<td style="width:50%;text-align:right">'.
+								(security::isLoggedIn()?
 									'<b>'.$user_info['name'].'</b> (<a href="/account/logout">Log Out</a>)':
-									'(<a href="/account/login">Log In</a>|<a href="/account/register">Register</a>)'),
-							'</td>',
-						'</tr>',
-					'</table>',
-					'<a href="/"><img src="/media/header.jpg" alt="Home"></a>',
-					($_SESSION['id']!==false?
-						'<iframe src="/omnomirc/index.php" width="100%" height="280" frameborder="0" name="OmnomIRC">Your browser does not support frames.</iframe>'
-						:''),
-					'<div style="text-align:left;" id="quickLinks">'.self::getQuickLinks($lang,$pathPartsParsed).'</div>',
-					'<div id="content">'
-			],'');
+									'(<a href="/account/login">Log In</a>|<a href="/account/register">Register</a>)').
+							'</td>'.
+						'</tr>'.
+					'</table>'.
+					'<a href="/"><img src="/media/header.jpg" alt="Home"></a>'.
+					(security::isLoggedIn()?
+						'<iframe src="/omnomirc/index.php" width="100%" height="280" frameborder="0" name="OmnomIRC"></iframe>':'').
+					'<div style="text-align:left;" id="quickLinks">'.self::getQuickLinks($lang,$pathPartsParsed).'</div>'.
+					'<div id="content">';
 	}
 	private static function getFooter(){
 		global $queryNum;
-		$loginScript = '';
-		if(isset($_COOKIE['shouldlogin']) && $_COOKIE['shouldlogin']=='true' && $_SESSION['id']==false){
-			$loginScript = implode([
-				'<script type="text/javascript" src="/jsencrypt.min.js"></script>',
-				'<script type="text/javascript">',
-					'$.getJSON("/getKeys").done(function(keys){',
-						'var encrypt = new JSEncrypt();',
-						'encrypt.setPublicKey(atob(keys.hash.key));',
-						'pwdenc = encrypt.encrypt(localStorage.getItem("longtimePwd"));',
-						'$.post("/account/verifyLogin?ltpwdv",{',
-							'pwd:pwdenc,',
-							'id:keys.hash.id,',
-							'fkey:keys.form.key,',
-							'fid:keys.form.id,',
-							'uid:localStorage.getItem("id")',
-						'}).done(function(data){',
-							'if(data.success){',
-								'document.cookie="session-id="+escape(data.sessid)+"; path=/";',
-								'location.reload();',
-							'}else{',
-								'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
-								'localStorage.removeItem("longtimePwd");',
-								'localStorage.removeItem("id");',
-							'}',
-						'})',
-					'});',
-				'</script>'
-			],'');
-		}
-		return implode([
-					'</div>',
-					'<script type="text/javascript">',
-						'$("article").css("min-height",$("nav>ul").height()+20);',
-					'</script>',
-					'<footer>',
-						'Page generated succesfully with <span id="queryNum">'.$queryNum.'</span> queries. ©Sorunome 2011-'.date('Y',time()),
-					'</footer>',
-					'</div>',
-					'<script type="text/javascript">',
-						'function parseLinks(){',
-							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a[href^="/"]\').off("click").click(function(e){',
-								'if(e.button==0){',
-									'e.preventDefault();',
-									'var href = this.href;',
-									'if(href.indexOf("/account/logout")!=-1){',
+		return '</div>'.
+					'<script type="text/javascript">'.
+						'$("article").css("min-height",$("nav>ul").height()+20);'.
+					'</script>'.
+					'<footer>'.
+						'Page generated succesfully with <span id="queryNum">'.$queryNum.'</span> queries. ©Sorunome 2011-'.date('Y',time()).
+					'</footer>'.
+					'</div>'.
+					'<script type="text/javascript">'.
+						'function parseLinks(){'.
+							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a[href^="/"]\').off("click").click(function(e){'.
+								'if(e.button==0){'.
+									'e.preventDefault();'.
+									'var href = this.href;'.
+									'if(href.indexOf("/account/logout")!=-1){'.
 										'window.location="/account/logout";'.
-									'}else{',
-										'$.getJSON(href+((href.indexOf("?")!=-1)?"&json":"?json")).done(function(page){',
-											'$("article").html(page.content);',
-											'$("title").html(page.title);',
-											'$("#quickLinks").html(page.quickLinks);',
-											'$("#queryNum").text(page.queries);',
-											'history.pushState({},page.title,href);',
-											'parseLinks();',
-										'});',
-									'}',
-								'}',
-							'});',
-						'}',
-						'parseLinks();',
-					'</script>',
-					$loginScript,
-				'</body>',
-			'</html>'],'');
+									'}else{'.
+										'getPageJSON(href);'.
+									'}'.
+								'}'.
+							'});'.
+						'}'.
+						'parseLinks();'.
+						(isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!security::isLoggedIn()?'reLogIn();':'').
+					'</script>'.
+				'</body>'.
+			'</html>';
 	}
 	private static function getNavInner($i=1,$path=''){
 		global $lang;
@@ -319,10 +353,6 @@ abstract class page{
 		$s = getVar('cache_nav_'.$lang);
 		return '<nav>'.$s.'</nav>';
 	}
-	private static function getContent($s){
-		global $bbParser;
-		return $bbParser->parse($s);
-	}
 	public static function cacheHeaders($s){
 		if (isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) >= filemtime($s)){
 			header('HTTP/1.0 304 Not Modified');
@@ -351,10 +381,39 @@ abstract class page{
 				'title' => $title,
 				'content' => $content,
 				'quickLinks' => $quicklinksHTML,
-				'queries' => $queryNum
+				'queries' => $queryNum,
+				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!security::isLoggedIn()
 			]);
 		}
 		return $pageHTML;
+	}
+	public static function commentHTML($comment,$canComment,$depth=0){
+		global $bbParser;
+		$timestamp = strtotime($comment['ts']);
+		return implode([
+					'<div style="margin-left:'.$depth.'px" class="comment">',
+						'<b>'.htmlspecialchars($comment['poster']).'</b>',
+						($comment['userId']==-1?' <i>guest post</i>':''),
+						' <span class="commentDate">('.date('l, F jS, Y',$timestamp).' at '.date('g:i:s A T',$timestamp).')</span>',
+						'<p>'.$bbParser->parse($comment['content'],explode(',',$comment['allowedTags'])).'</p>',
+						($canComment?'<a href="'.$comment['id'].'" class="reply">Reply</a>':''),
+					'</div>'
+				],'');
+	}
+	private static function getComments($pid,$canComment,$refId = -1,$depth = 0){
+		$res = sql::query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE pageId='%s' AND refId='%s' ORDER BY ts DESC",[$pid,$refId]);
+		$temp = $res[0];
+		if($temp['id']==NULL && $refId == -1){
+			return 'no comments';
+		}
+		$html = '';
+		foreach($res as $comment){
+			if($comment['id']!==NULL){
+				$html .= self::commentHTML($comment,$canComment,$depth);
+				$html .= self::getComments($pid,$canComment,$comment['id'],$depth+10);
+			}
+		}
+		return $html;
 	}
 	public static function getPageFromSQL($pathPartsParsed,$lang){
 		global $bbParser;
@@ -365,7 +424,7 @@ abstract class page{
 			$pathPartsParsed[0] = 'index';
 		}
 		$query = '';
-		$getParams = 'ts,content_%s,title_%s,settings';
+		$getParams = 'ts,content_%s,title_%s,settings,id';
 		for($i=sizeof($pathPartsParsed)-1;$i>=0;$i--){
 			if(sizeof($pathPartsParsed)==1){
 				$query = "SELECT $getParams FROM pages WHERE name='%s' AND refId='1'";
@@ -381,7 +440,74 @@ abstract class page{
 		}
 		$page = sql::query($query,array_merge([$lang,$lang],$pathPartsParsed),0);
 		if($page['ts']!=NULL){
-			echo self::getPage($page['title_'.$lang],$bbParser->parse($page['content_'.$lang]),$lang,$pathPartsParsed,$page['settings']);
+			$html = $bbParser->parse($page['content_'.$lang],['*']);
+			if($page['settings'] & 4){
+				$commentsHTML = self::getComments($page['id'],security::isLoggedIn() || $page['settings'] & 8);
+				$html .=implode([
+					'<hr>',
+					'<h2>Comments</h2>',
+					(security::isLoggedIn() || $page['settings'] & 8?
+						'<span id="topComment"></span>':
+						'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!'),
+					'<br>',
+					$commentsHTML,
+					'<script type="text/javascript">',
+						'(function($){',
+							'var getReplyForm = function(refId){',
+									'return $("<div>")',
+										'.append(',
+											'$("<span>")',
+												'.css("font-size","18px")',
+												'.text("Reply:"),',
+											'"<br>",',
+											'$("<form>")',
+												'.append(',
+													(!security::isLoggedIn() && $page['settings'] & 8?
+														'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':''),
+													'$("<textarea>")',
+														'.attr("maxlength","500")',
+														'.css({"width":"90%","height":"105px"}),',
+													'$("<input>")',
+														'.attr({"type":"text","name":"pageId"})',
+														'.css("display","none")',
+														'.val("'.$page['id'].'"),',
+													'$("<input>")',
+														'.attr({"type":"text","name":"refId"})',
+														'.css("display","none")',
+														'.val(refId),',
+													'"<br>",',
+													'$("<input>")',
+														'.attr("type","submit")',
+														'.val("Post")',
+												')',
+												'.submit(function(e){',
+													'e.preventDefault();',
+													'var form = this;',
+													'$.getJSON("/getKeys").done(function(keys){',
+														'$.post("/comment",{',
+															(!security::isLoggedIn() && $page['settings'] & 8?
+																'name:$(form).find(\'[name="name"]\').val(),':''),
+															'comment:$(form).find("textarea").val(),',
+															'pageId:$(form).find(\'[name="pageId"]\').val(),',
+															'refId:$(form).find(\'[name="refId"]\').val(),',
+															'fkey:keys.form.key,',
+															'fid:keys.form.id',
+														'}).done(function(data){',
+															'$(form).parent().html(data);',
+															'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});',
+														'});',
+													'})',
+												'})',
+										')',
+								'};',
+							'try{$(".reply").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});',
+							'$("#topComment").append(getReplyForm(-1));}catch(e){}',
+						'})(jQuery)',
+					'</script>',
+					'<br>',
+				],'');
+			}
+			echo self::getPage($page['title_'.$lang],$html,$lang,$pathPartsParsed,$page['settings']);
 		}else{
 			echo self::getPage('404 not found',self::do404(),$lang,$pathPartsParsed);
 		}
@@ -391,7 +517,7 @@ abstract class page{
 if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<strpos($_SERVER['REQUEST_URI'],'?')){
 	$_GET['path'] .= 'index.php';
 }
-if($_SESSION['id']!==false){
+if(security::isLoggedIn()){
 	$user_info = sql::query("SELECT session,name,settings,power FROM users WHERE id='%s'",[$_SESSION['id']],0);
 	if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$user_info['session']){
 		$_SESSION['id'] = false;
@@ -421,24 +547,52 @@ switch($pathPartsParsed[0]){
 		header('Content-type: text/json');
 		echo security::makeKeysJSON();
 		break;
+	case 'comment':
+		if(!isset($_POST['refId']) || !isset($_POST['pageId']) || !isset($_POST['comment']) || !isset($_POST['fid']) || !isset($_POST['fkey']))
+			die('Missing required field');
+		if(!security::validateForm($_POST['fid'],$_POST['fkey']))
+			die('ERROR: Invalid session, please refresh the page');
+		$page = sql::query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
+		if(!security::isLoggedIn() && !($page['settings'] & 8))
+			die('ERROR: You need to log in to post');
+		if(!security::isLoggedIn()){
+			if(strlen($_POST['name']) > 50)
+				die('ERROR: too long name');
+			if(!preg_match("/^[0-9a-zA-Z ]+$/",$_POST['name']))
+				die('ERROR: Not a valid name!');
+			$uid = -1;
+			$name = $_POST['name'];
+		}else{
+			$uid = $_SESSION['id'];
+			$name = $user_info['name'];
+		}
+		if(strlen($_POST['comment']) > 500)
+			die('ERROR: Comment too long');
+		$page = sql::query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
+		if(!$page['settings'] & 4)
+			die('ERROR: You can\'t post comments on this page');
+		sql::query("INSERT INTO comments (pageId,refId,userId,poster,content,allowedTags) VALUES ('%s','%s','%s','%s','%s','b,i,url')",
+			[(int)$_POST['pageId'],(int)$_POST['refId'],$uid,$name,$_POST['comment']]);
+		$id = sql::query("SELECT MAX(id) FROM comments",[],0);
+		$comment = sql::query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE id='%s'",[$id['MAX(id)']],0);
+		echo page::commentHTML($comment,true);
+		break;
 	case 'account':
 		if(isset($pathPartsParsed[1])){
 			switch($pathPartsParsed[1]){
 				case 'key':
 					$user = sql::query("SELECT randkey,power FROM users WHERE id='%s'",[$_GET['i']],0);
-					$pageHTML=getHeader('Account Key',$lang,$pathPartsParsed);
-					$pageHTML.=getNav();
+					$pageHTML = '';
 					if(isset($user['randkey']) && $user['randkey']==$_GET['k']){
 						if(!$user['power']&1){
 							$user['power'] = ((int)$user['power']|1);
-							$pageHTML.='<article>Activated account, now you can <a href="/account/login">log in</a>.</article>';
+							$pageHTML='Activated account, now you can <a href="/account/login">log in</a>.';
 						}
 						sql::query("UPDATE users SET randkey='',power='%s' WHERE id='%s'",[$user['power'],$_GET['i']]);
 					}else{
-						$pageHTML.='<article><b>ERROR</b> invalid key</b></article>';
+						$pageHTML='<b>ERROR</b> invalid key</b>';
 					}
-					$pageHTML.=getFooter();
-					echo $pageHTML;
+					echo page::getPage('Account Key',$pageHTML,$lang,$pathPartsParsed);
 					break;
 				case 'logout':
 					$_SESSION['id'] = false;
@@ -473,7 +627,7 @@ switch($pathPartsParsed[0]){
 					}elseif(isset($_GET['ltpwd'])){
 						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']))
 							die('{"success":false,"message":"ERROR: Missing required field"}');
-						if($_SESSION['id']===false)
+						if(!security::isLoggedIn())
 							die('{"success":false,"message":"ERROR: Not logged in"}');
 						if(!security::validateForm($_POST['fid'],$_POST['fkey']))
 							die('{"success":false,"message":"ERROR: Invalid session, please refresh the page"}');
@@ -491,6 +645,8 @@ switch($pathPartsParsed[0]){
 						$user = sql::query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
 						if(!isset($user['id']))
 							die('{"success":false,"message":"ERROR: User doesn\'t exist!"}');
+						if(!$user['power']&0)
+							die('{"success":false,"message":"ERROR: Account not activated!"}');
 						if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
 							die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
 						$_SESSION['id'] = $user['id'];

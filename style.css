@@ -13,6 +13,7 @@ body {
 	padding:0;
 	background-image:url("/media/background.jpg");
 	background-attachment:fixed;
+	font-size:16px;
 }
 #main {
 	width:90%;
@@ -83,4 +84,18 @@ a,a:link,a:visited,a:active,a:hover{
 a:hover{
 	text-shadow:0 0 5px rgba(0,40,170,0.5);
 	cursor:pointer;
+}
+hr {
+	border-top:1px solid #146907;
+	border-bottom-style:none;
+	margin:2px 0;
+	padding:0;
+}
+.comment{
+	border:1px solid #146907;
+	padding:5px;
+	margin-top:-1px;
+}
+.commentDate{
+	font-size:11px;
 }
