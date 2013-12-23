@@ -226,7 +226,7 @@ abstract class page{
 									'if(data.success){'.
 										'document.cookie="session-id="+escape(data.sessid)+"; path=/";'.
 										'if(LOGGEDIN){'.
-											'getPageJSON(document.URL);'.
+											'getPageJSON(document.URL,false);'.
 										'}else{'.
 											'location.reload();'.
 										'}'.
@@ -390,15 +390,13 @@ abstract class page{
 	public static function commentHTML($comment,$canComment,$depth=0){
 		global $bbParser;
 		$timestamp = strtotime($comment['ts']);
-		return implode([
-					'<div style="margin-left:'.$depth.'px" class="comment">',
-						'<b>'.htmlspecialchars($comment['poster']).'</b>',
-						($comment['userId']==-1?' <i>guest post</i>':''),
-						' <span class="commentDate">('.date('l, F jS, Y',$timestamp).' at '.date('g:i:s A T',$timestamp).')</span>',
-						'<p>'.$bbParser->parse($comment['content'],explode(',',$comment['allowedTags'])).'</p>',
-						($canComment?'<a href="'.$comment['id'].'" class="reply">Reply</a>':''),
-					'</div>'
-				],'');
+		return '<div style="margin-left:'.$depth.'px" class="comment">'.
+					'<b>'.htmlspecialchars($comment['poster']).'</b>'.
+					($comment['userId']==-1?' <i>guest post</i>':'').
+					' <span class="commentDate">('.date('l, F jS, Y',$timestamp).' at '.date('g:i:s A T',$timestamp).')</span>'.
+					'<p>'.$bbParser->parse($comment['content'],explode(',',$comment['allowedTags'])).'</p>'.
+					($canComment?'<a href="'.$comment['id'].'" class="reply">Reply</a>':'').
+				'</div>';
 	}
 	private static function getComments($pid,$canComment,$refId = -1,$depth = 0){
 		$res = sql::query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE pageId='%s' AND refId='%s' ORDER BY ts DESC",[$pid,$refId]);
@@ -443,69 +441,67 @@ abstract class page{
 			$html = $bbParser->parse($page['content_'.$lang],['*']);
 			if($page['settings'] & 4){
 				$commentsHTML = self::getComments($page['id'],security::isLoggedIn() || $page['settings'] & 8);
-				$html .=implode([
-					'<hr>',
-					'<h2>Comments</h2>',
-					(security::isLoggedIn() || $page['settings'] & 8?
-						'<span id="topComment"></span>':
-						'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!'),
-					'<br>',
-					$commentsHTML,
-					'<script type="text/javascript">',
-						'(function($){',
-							'var getReplyForm = function(refId){',
-									'return $("<div>")',
-										'.append(',
-											'$("<span>")',
-												'.css("font-size","18px")',
-												'.text("Reply:"),',
-											'"<br>",',
-											'$("<form>")',
-												'.append(',
-													(!security::isLoggedIn() && $page['settings'] & 8?
-														'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':''),
-													'$("<textarea>")',
-														'.attr("maxlength","500")',
-														'.css({"width":"90%","height":"105px"}),',
-													'$("<input>")',
-														'.attr({"type":"text","name":"pageId"})',
-														'.css("display","none")',
-														'.val("'.$page['id'].'"),',
-													'$("<input>")',
-														'.attr({"type":"text","name":"refId"})',
-														'.css("display","none")',
-														'.val(refId),',
-													'"<br>",',
-													'$("<input>")',
-														'.attr("type","submit")',
-														'.val("Post")',
-												')',
-												'.submit(function(e){',
-													'e.preventDefault();',
-													'var form = this;',
-													'$.getJSON("/getKeys").done(function(keys){',
-														'$.post("/comment",{',
-															(!security::isLoggedIn() && $page['settings'] & 8?
-																'name:$(form).find(\'[name="name"]\').val(),':''),
-															'comment:$(form).find("textarea").val(),',
-															'pageId:$(form).find(\'[name="pageId"]\').val(),',
-															'refId:$(form).find(\'[name="refId"]\').val(),',
-															'fkey:keys.form.key,',
-															'fid:keys.form.id',
-														'}).done(function(data){',
-															'$(form).parent().html(data);',
-															'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});',
-														'});',
-													'})',
-												'})',
-										')',
-								'};',
-							'try{$(".reply").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});',
-							'$("#topComment").append(getReplyForm(-1));}catch(e){}',
-						'})(jQuery)',
-					'</script>',
-					'<br>',
-				],'');
+				$html .= '<hr>'.
+						'<h2>Comments</h2>'.
+						(security::isLoggedIn() || $page['settings'] & 8?
+							'<span id="topComment"></span>':
+							'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!').
+						'<br>'.
+						$commentsHTML.
+						'<script type="text/javascript">'.
+							'(function($){'.
+								'var getReplyForm = function(refId){'.
+										'return $("<div>")'.
+											'.append('.
+												'$("<span>")'.
+													'.css("font-size","18px")'.
+													'.text("Reply:"),'.
+												'"<br>",'.
+												'$("<form>")'.
+													'.append('.
+														(!security::isLoggedIn() && $page['settings'] & 8?
+															'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':'').
+														'$("<textarea>")'.
+															'.attr("maxlength","500")'.
+															'.css({"width":"90%","height":"105px"}),'.
+														'$("<input>")'.
+															'.attr({"type":"text","name":"pageId"})'.
+															'.css("display","none")'.
+															'.val("'.$page['id'].'"),'.
+														'$("<input>")'.
+															'.attr({"type":"text","name":"refId"})'.
+															'.css("display","none")'.
+															'.val(refId),'.
+														'"<br>",'.
+														'$("<input>")'.
+															'.attr("type","submit")'.
+															'.val("Post")'.
+													')'.
+													'.submit(function(e){'.
+														'e.preventDefault();'.
+														'var form = this;'.
+														'$.getJSON("/getKeys").done(function(keys){'.
+															'$.post("/comment",{'.
+																(!security::isLoggedIn() && $page['settings'] & 8?
+																	'name:$(form).find(\'[name="name"]\').val(),':'').
+																'comment:$(form).find("textarea").val(),'.
+																'pageId:$(form).find(\'[name="pageId"]\').val(),'.
+																'refId:$(form).find(\'[name="refId"]\').val(),'.
+																'fkey:keys.form.key,'.
+																'fid:keys.form.id'.
+															'}).done(function(data){'.
+																'$(form).parent().html(data);'.
+																'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
+															'});'.
+														'})'.
+													'})'.
+											')'.
+									'};'.
+								'try{$(".reply").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
+								'$("#topComment").append(getReplyForm(-1));}catch(e){}'.
+							'})(jQuery)'.
+						'</script>'.
+						'<br>';
 			}
 			echo self::getPage($page['title_'.$lang],$html,$lang,$pathPartsParsed,$page['settings']);
 		}else{
@@ -538,10 +534,8 @@ foreach ($pathParts as $part) {
 			$part = substr($part,0,strrpos($part,"."));
 		}
 		$pathPartsParsed[] = str_replace(' ','+',$part);
-		//$pathPartsParsedUpper[] = str_replace(' ','+',$part);
 	}
 }
-//die($_SERVER['DOCUMENT_ROOT'].'/'.join('/',$pathPartsParsedUpper).'.'.$fileExtention);
 switch($pathPartsParsed[0]){
 	case 'getKeys':
 		header('Content-type: text/json');
@@ -597,15 +591,13 @@ switch($pathPartsParsed[0]){
 				case 'logout':
 					$_SESSION['id'] = false;
 					session_destroy();
-					echo page::getPage('Log Out',implode([
-						'You are now logged out.',
-						'<script type="text/javascript">',
-							'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
-							'document.cookie="session-id=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";',
-							'localStorage.removeItem("longtimePwd");',
-							'localStorage.removeItem("id");',
-						'</script>'
-					],''),$lang,$pathPartsParsed);
+					echo page::getPage('Log Out','You are now logged out.'.
+						'<script type="text/javascript">'.
+							'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
+							'document.cookie="session-id=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
+							'localStorage.removeItem("longtimePwd");'.
+							'localStorage.removeItem("id");'.
+						'</script>',$lang,$pathPartsParsed);
 					break;
 				case 'verifyLogin':
 					header('Content-type: text/json');
