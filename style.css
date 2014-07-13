@@ -99,3 +99,7 @@ hr {
 .commentDate{
 	font-size:11px;
 }
+
+#permalink > a[pageid="0"]{
+	display:none;
+}

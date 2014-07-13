@@ -67,7 +67,7 @@ $bbParser->addTag('h1',function($type,$s,$attrs,$bbParser){
 	return '<h1>'.$bbParser->parse($s).'</h1>';
 },[],'h1');
 $bbParser->addTag('h2',function($type,$s,$attrs,$bbParser){
-	return '<h2>'.$bbParser->parse($s).'</h2>';
+	return '<h2>'.$bbParser->parse($s).'</h2';
 },[],'h2');
 $bbParser->addTag('instructables',function($type,$s,$attrs,$bbParser){
 	if(!preg_match('/^[a-zA-Z0-9-+]+$/',$s))
