@@ -201,6 +201,10 @@ class Analytics{
 	 * 4 - ident string
 	 * 5 - referer
 	 * 6 - user
+	 * 7 - global_views_all_no_bots
+	 * 8 - global_views_only_content_no_bots
+	 * 9 - page_hit_no_bots
+	 * 10 - visits (session) no bots
 	 * 
 	 */
 	private $query;
@@ -226,7 +230,7 @@ class Analytics{
 		if($i===false){
 			return $query;
 		}
-		return $query[0][$i];
+		return ($query[0][$i]?(int)$query[0][$i]:0);
 	}
 	public function getTable($t,$m,$y){
 		$pages = $this->getData($t,$m,$y);
@@ -243,6 +247,12 @@ class Analytics{
 			case 6:
 				$msg = ['users','User'];
 				break;
+			case 9:
+				$msg = ['pages','Page'];
+				break;
+			case 11:
+				$msg = ['agents','Agent'];
+				break;
 			default:
 				return;
 		}
@@ -254,14 +264,14 @@ class Analytics{
 		return $html;
 	}
 	public function getAllTables($m,$y){
-		return $this->getTable(2,$m,$y).$this->getTable(4,$m,$y).$this->getTable(5,$m,$y).$this->getTable(6,$m,$y);
+		return $this->getTable(9,$m,$y).$this->getTable(11,$m,$y).$this->getTable(5,$m,$y).$this->getTable(6,$m,$y);
 	}
 	public function getMonth($m,$y){
 		$date = DateTime::createFromFormat('m Y',$m.' '.$y);
 		return '<b><u>Analytics for '.$date->format('F Y').'</u></b><br><br>'.
-				'Total Hits: '.$this->getData(0,$m,$y,'c').'<br>'.
-				'Total Pages: '.$this->getData(1,$m,$y,'c').'<br>'.
-				'Total Visits: '.$this->getData(3,$m,$y,'c').'<br>'.
+				'Total Hits: '.$this->getData(7,$m,$y,'c').'/'.$this->getData(0,$m,$y,'c').'<br>'.
+				'Total Pages: '.$this->getData(8,$m,$y,'c').'/'.$this->getData(1,$m,$y,'c').'<br>'.
+				'Total Visits: '.$this->getData(10,$m,$y,'c').'/'.$this->getData(3,$m,$y,'c').'<br>'.
 				'<br>'.$this->getAllTables($m,$y);
 	}
 	public function __construct(){
@@ -270,14 +280,29 @@ class Analytics{
 		$this->params = [];
 		$this->otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf'];
 		$this->addNum(0);
+		$isNoBot = (isset($_SERVER['HTTP_USER_AGENT']) && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'bot')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'spider')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'crawl')===false);
+		if($isNoBot){
+			$this->addNum(7);
+		}
 		if(!in_array(strtolower($fileExtention),$this->otherPages)){
 			$this->addNum(1);
 			$this->addNum(2,$_GET['path']);
-			if((!isset($_SESSION['counted_visit']) || !$_SESSION['counted_visit']) && isset($_SESSION['haveCookies']) && $_SESSION['haveCookies']){
+			$isVisit = ((!isset($_SESSION['counted_visit']) || !$_SESSION['counted_visit']) && isset($_SESSION['haveCookies']) && $_SESSION['haveCookies']);
+			if($isVisit){
 				$this->addNum(3);
+			}
+			if($isNoBot){
+				$this->addNum(8);
+				$this->addNum(9,$_GET['path']);
+				if($isVisit){
+					$this->addNum(10);
+				}
 			}
 			if(isset($_SERVER['HTTP_USER_AGENT'])){
 				$this->addNum(4,$_SERVER['HTTP_USER_AGENT']);
+				if($isNoBot){
+					$this->addNum(11,$_SERVER['HTTP_USER_AGENT']);
+				}
 			}
 			if(isset($_SERVER['HTTP_REFERER'])){
 				$ana_uri = parse_url($_SERVER['HTTP_REFERER']);
@@ -754,7 +779,7 @@ abstract class page{
 if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<strpos($_SERVER['REQUEST_URI'],'?')){
 	$_GET['path'] .= 'index.php';
 }
-if(security::isLoggedIn()){
+if(security::isLoggedIn()){ // grab user info
 	$user_info = sql::query("SELECT session,name,settings,power FROM users WHERE id='%s'",[$_SESSION['id']],0);
 	if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$user_info['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
 		$_SESSION['id'] = false;
@@ -763,7 +788,7 @@ if(security::isLoggedIn()){
 		$_SESSION['overrideLoginCheck'] = false;
 	}
 }
-if(isset($_COOKIE['shouldlogin'])){
+if(isset($_COOKIE['shouldlogin'])){ // extend log in cookie
 	setcookie('shouldlogin', $_COOKIE['shouldlogin'], time()+3600*24*30,'/');
 }
 $fullPath=str_replace(' ','+',$_GET['path']);
@@ -794,12 +819,15 @@ switch($pathPartsParsed[0]){
 				$hits = sql::query('SELECT counter AS c,UNIX_TIMESTAMP(ts) AS time FROM analytics WHERE type=0 ORDER BY ts DESC');
 				$files = sql::query('SELECT counter AS c FROM analytics WHERE type=1 ORDER BY ts DESC');
 				$visits = sql::query('SELECT counter AS c FROM analytics WHERE type=3 ORDER BY ts DESC');
+				$hitsnb = sql::query('SELECT counter AS c FROM analytics WHERE type=7 ORDER BY ts DESC');
+				$filesnb = sql::query('SELECT counter AS c FROM analytics WHERE type=8 ORDER BY ts DESC');
+				$visitsnb = sql::query('SELECT counter AS c FROM analytics WHERE type=10 ORDER BY ts DESC');
 				$pageHTML = '<h2>Analytics</h2><table class="statstable"><tr><th>Month</th><th>Hits</th><th>Pages</th><th>Visits</th></tr>';
 				for($i=0;$i<sizeof($hits);$i++){
 					$pageHTML .= '<tr><td><a href="/analytics?m='.date('m',$hits[$i]['time']).'&y='.date('Y',$hits[$i]['time']).'">'.date('F Y',$hits[$i]['time']).'</a></td><td>'.
-									$hits[$i]['c'].'</td><td>'.
-									$files[$i]['c'].'</td><td>'.
-									$visits[$i]['c'].'</td></tr>';
+									(array_key_exists($i,$hitsnb)?$hitsnb[$i]['c']:0).'/'.(array_key_exists($i,$hits)?$hits[$i]['c']:0).'</td><td>'.
+									(array_key_exists($i,$filesnb)?$filesnb[$i]['c']:0).'/'.(array_key_exists($i,$files)?$files[$i]['c']:0).'</td><td>'.
+									(array_key_exists($i,$visitsnb)?$visitsnb[$i]['c']:0).'/'.(array_key_exists($i,$visits)?$visits[$i]['c']:0).'</td></tr>';
 				}
 				$pageHTML .= '</table>';
 			}
