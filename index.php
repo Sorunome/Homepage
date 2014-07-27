@@ -1077,13 +1077,13 @@ switch($pathPartsParsed[0]){
 		switch($fileExtention) {
 			case 'zip':
 				if($file = file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
+					
 					header('Content-Description: File Transfer');
-					header('Content-Type: application/'.$fileExtention);
-					header('Content-Disposition: attachment; filename="'.$pathPartsParsed[len($pathPartsParsed)].'"');
+					header('Content-Type: application/zip');
+					header('Content-Disposition: attachment; filename="'.$pathPartsParsed[sizeof($pathPartsParsed)-1].'.zip"');
 					header('Content-Transfer-Encoding: binary');
 					header('Content-Length: '.filesize($_SERVER['DOCUMENT_ROOT'].$fullPath));
-					ob_end_flush();
-					echo $file;
+					readfile($_SERVER['DOCUMENT_ROOT'].$fullPath);
 				}else{
 					echo page::getPage('404 not found',page::do404(),$lang,$pathPartsParsed);
 				}
