@@ -445,13 +445,13 @@ abstract class page{
 					'<div id="main">'.
 					'<table style="margin:0;padding:0;border:none;width:100%;font-size:11px">'.
 						'<tr>'.
-							'<td style="width:50%;text-align:left"></td>'.
+							'<td style="width:50%;text-align:left"><a href="/rssfeed.php" target="_blank" quick="false"><img src="/20/*/media/rss.png" alt="RSS Feed"></a></td>'.
 							'<td style="width:50%;text-align:right">'.
 								(security::isLoggedIn()?
 									'<b>'.$user_info['name'].'</b> ('.
 										($user_info['power']&8?'<a href="/analytics">Analytics</a> | ':'').
 										'<a quick="false" href="/account/logout">Log Out</a>)':
-									'(<a href="/account/login">Log In</a>|<a href="/account/register">Register</a>)').
+									'(<a href="/account/login">Log In</a> | <a href="/account/register">Register</a>)').
 							'</td>'.
 						'</tr>'.
 					'</table>'.
@@ -1077,10 +1077,9 @@ switch($pathPartsParsed[0]){
 		switch($fileExtention) {
 			case 'zip':
 				if($file = file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
-					
 					header('Content-Description: File Transfer');
-					header('Content-Type: application/zip');
-					header('Content-Disposition: attachment; filename="'.$pathPartsParsed[sizeof($pathPartsParsed)-1].'.zip"');
+					header('Content-Type: application/'.$fileExtention);
+					header('Content-Disposition: attachment; filename="'.$pathPartsParsed[sizeof($pathPartsParsed)-1].'.'.$fileExtention.'"');
 					header('Content-Transfer-Encoding: binary');
 					header('Content-Length: '.filesize($_SERVER['DOCUMENT_ROOT'].$fullPath));
 					readfile($_SERVER['DOCUMENT_ROOT'].$fullPath);
