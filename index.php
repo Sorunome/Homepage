@@ -494,12 +494,9 @@ abstract class page{
 						'function parseLinks(){'.
 							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a[href^="/"]\').off("click").click(function(e){'.
 								'if(e.button==0){'.
-									'e.preventDefault();'.
-									'var href = this.href;'.
-									'if($(this).attr("quick")=="false"){'.
-										'window.location=href;'.
-									'}else{'.
-										'getPageJSON(href);'.
+									'if(!($(this).attr("quick")=="false" || this.href.indexOf(".zip")!=-1)){'.
+										'e.preventDefault();'.
+										'getPageJSON(this.href);'.
 									'}'.
 								'}'.
 							'});'.
@@ -642,6 +639,16 @@ abstract class page{
 			}
 		}
 		$page = sql::query($query,array_merge([$lang,$lang],$pathPartsParsed),0);
+		if($page['id']==1){ // index
+			$bbParser->addTag('news',function($type,$s,$attrs,$bbParser){
+				$res = sql::query("SELECT `news_en`,`ts`,`id` FROM news ORDER BY ts DESC",[]);
+				$returnHTML = '<table style="background-color:#5D7859;border:1px solid black;border-collapse:collapse;"><tr><th>Date</th><th>News</th></tr>';
+				foreach($res as $r){
+					$returnHTML .= '<tr id="news'.$r['id'].'"><td style="border:1px solid black;border-collapse:collapse;">'.date('jS F Y',strtotime($r['ts'])).'</td><td style="border:1px solid black;border-collapse:collapse;">'.$bbParser->parse($r['news_en']).'</td></tr>';
+				}
+				return $returnHTML.'</table>';
+			},[],'Creates the news table');
+		}
 		if($page['ts']!=NULL){
 			$html = $bbParser->parse($page['content_'.$lang],['*']);
 			if(security::isLoggedIn() && $user_info['power']&4){
@@ -780,7 +787,7 @@ if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<
 	$_GET['path'] .= 'index.php';
 }
 if(security::isLoggedIn()){ // grab user info
-	$user_info = sql::query("SELECT session,name,settings,power FROM users WHERE id='%s'",[$_SESSION['id']],0);
+	$user_info = sql::query("SELECT session,name,settings,power,id FROM users WHERE id='%s'",[$_SESSION['id']],0);
 	if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$user_info['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
 		$_SESSION['id'] = false;
 		unset($user_info);
