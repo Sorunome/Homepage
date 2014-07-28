@@ -1,5 +1,5 @@
 <?php
-$bbParser = new bbParser;
+$bbParser = new bbParser();
 $bbParser->addTag('b',function($type,$s,$attrs,$bbParser){
 	return '<b>'.$bbParser->parse($s).'</b>';
 },[],'bold');

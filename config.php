@@ -1,8 +1,5 @@
 <?php
-include_once('scrypt.php');
-$sql_host = 'localhost';
-$sql_username = '<sql user>';
-$sql_password = '<sql password>';
-$sql_db = '<sql database>';
-$private_salt_key = '<random string>';
+//JSONSTART
+//{"sql_host":"localhost","sql_user":"sql_user","sql_database":"sql_database","sql_password":"sql_password","private_salt_key":"random string"}
+//JSONEND
 ?>

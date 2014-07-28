@@ -3,6 +3,9 @@ ini_set('display_errors',1);
 ini_set('display_startup_errors',1);
 error_reporting(-1);
 session_start();
+include_once('scrypt.php');
+include_once('options.php');
+include_once('sql.php');
 if((!isset($_SESSION['checkedCookies']) || !$_SESSION['checkedCookies']) && !isset($_GET['overrideCookieCheck']) && (!isset($_COOKIE['haveCookies']) || !$_COOKIE['haveCookies'])){
 	$_SESSION['haveCookies'] = true;
 	$_SESSION['oldPath'] = $_GET['path'];
@@ -29,7 +32,6 @@ if(!isset($_SESSION['id'])){
 ob_start();
 include_once('config.php');
 $lang = 'en';
-$queryNum = 0;
 date_default_timezone_set('UTC');
 /*
 Settings:
@@ -46,90 +48,37 @@ Power
 8 - view analytics
 16 - edit page structure
 */
-abstract class sql{
-	private $mysqliConnection;
-	private static function connectSql(){
-		global $sql_username,$sql_password,$sql_host,$sql_db,$mysqliConnection;
-		if(isset($mysqliConnection)){
-			return $mysqliConnection;
-		}
-		$mysqli = new mysqli($sql_host,$sql_username,$sql_password,$sql_db);
-		if ($mysqli->connect_errno) 
-			die('Could not connect to SQL DB: '.$mysqli->connect_errno.' '.$mysqli->connect_error);
-		$mysqli->autocommit(true);
-		$mysqliConnection = $mysqli;
-		return $mysqli;
+
+class Security{
+	private $checkedSessKey;
+	public function __construct(){
+		$this->checkedSessKey = false;
 	}
-	public static function query($query,$args = [],$num = false){
-		global $queryNum;
-		$mysqli = self::connectSql();
-		for($i=0;$i<count($args);$i++)
-			$args[$i] = $mysqli->real_escape_string($args[$i]);
-		$queryNum++;
-		if($num===true){
-			$mysqli->multi_query(vsprintf($query,$args));
-			do{
-				if($result = $mysqli->store_result()){
-					$result->free();
-				}
-				if(!$mysqli->more_results()){
-					break;
-				}
-			}while($mysqli->next_result());
-			return NULL;
-		}else{
-			$result = $mysqli->query(vsprintf($query,$args));
-			if($mysqli->errno==1065) //empty
-				return array();
-			if($mysqli->errno!=0) 
-				die($mysqli->error.' Query: '.vsprintf($query,$args));
-			if($result===true) //nothing returned
-				return array();
-			$res = array();
-			$i = 0;
-			while($row = $result->fetch_assoc()){
-				$res[] = $row;
-				if($num!==false && $i===$num){
-					$result->free();
-					return $row;
-				}
-				if($i++>=150)
-					break;
-			}
-			if($res === []){
-				$fields = $result->fetch_fields();
-				for($i=0;$i<count($fields);$i++)
-					$res[$fields[$i]->name] = NULL;
-				if($num===false)
-					$res = array($res);
-			}
-			return $res;
-		}
+	private function clearOldKeys(){
+		global $sql;
+		$sql->query("DELETE FROM form_keys WHERE ts < (NOW() - INTERVAL 1 MINUTE)");
+		$sql->query("DELETE FROM rsa_keys WHERE ts < (NOW() - INTERVAL 1 MINUTE)");
 	}
-}
-abstract class security{
-	private static function clearOldKeys(){
-		sql::query("DELETE FROM form_keys WHERE ts < (NOW() - INTERVAL 1 MINUTE)");
-		sql::query("DELETE FROM rsa_keys WHERE ts < (NOW() - INTERVAL 1 MINUTE)");
-	}
-	private static function makeFormKey(){
-		self::clearOldKeys();
-		$s = self::generateRandomString(50);
-		sql::query("INSERT INTO form_keys (fkey) VALUES ('%s')",[$s]);
-		$id = sql::query("SELECT MAX(id) FROM form_keys",[],0);
+	private function makeFormKey(){
+		global $sql;
+		$this->clearOldKeys();
+		$s = $this->generateRandomString(50);
+		$sql->query("INSERT INTO form_keys (fkey) VALUES ('%s')",[$s]);
+		$id = $sql->query("SELECT MAX(id) FROM form_keys",[],0);
 		return [$s,$id['MAX(id)']];
 	}
-	private static function createKeys(){
-		self::clearOldKeys();
+	private function createKeys(){
+		global $sql;
+		$this->clearOldKeys();
 		$res = openssl_pkey_new();
 		openssl_pkey_export($res, $privKey);
 		$pubKey = openssl_pkey_get_details($res);
 		$pubKey = $pubKey['key'];
-		sql::query("INSERT INTO rsa_keys (privKey,pubKey) VALUES ('%s','%s')",[$privKey,$pubKey]);
-		$id = sql::query("SELECT MAX(id) FROM rsa_keys",[],0);
+		$sql->query("INSERT INTO rsa_keys (privKey,pubKey) VALUES ('%s','%s')",[$privKey,$pubKey]);
+		$id = $sql->query("SELECT MAX(id) FROM rsa_keys",[],0);
 		return [$pubKey,$id['MAX(id)']];
 	}
-	public static function generateRandomString($length = 10) {
+	public function generateRandomString($length = 10) {
 		$characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
 		$randomString = '';
 		for($i = 0;$i < $length;$i++) {
@@ -137,54 +86,79 @@ abstract class security{
 		}
 		return $randomString;
 	}
-	public static function validateForm($id,$key){
-		self::clearOldKeys();
-		$key2 = sql::query("SELECT fkey FROM form_keys WHERE id='%s'",[$id],0);
-		sql::query("DELETE FROM form_keys WHERE id='%s'",[$id]);
-		if($key!=$key2['fkey'])
+	public function validateForm($id,$key){
+		global $sql;
+		$this->clearOldKeys();
+		$key2 = $sql->query("SELECT fkey FROM form_keys WHERE id='%s'",[$id],0);
+		$sql->query("DELETE FROM form_keys WHERE id='%s'",[$id]);
+		if($key!=$key2['fkey']){
 			return false;
+		}
 		return true;
 	}
-	public static function getPwdFromKey($id,$pwd){
-		self::clearOldKeys();
-		$key = sql::query("SELECT privKey FROM rsa_keys WHERE id='%s'",[$id],0);
-		sql::query("DELETE FROM rsa_keys WHERE id='%s'",[$id]);
+	public function getPwdFromKey($id,$pwd){
+		global $sql;
+		$this->clearOldKeys();
+		$key = $sql->query("SELECT privKey FROM rsa_keys WHERE id='%s'",[$id],0);
+		$sql->query("DELETE FROM rsa_keys WHERE id='%s'",[$id]);
 		@openssl_private_decrypt(base64_decode($pwd),$end,@openssl_get_privatekey($key['privKey']));
 		return $end;
 	}
-	public static function makeKeysJSON(){
-		$fk = self::makeFormKey();
-		$hk = self::createKeys();
+	public function makeKeysJSON(){
+		$fk = $this->makeFormKey();
+		$hk = $this->createKeys();
 		return '{"form":{"id":"'.$fk[1].'","key":"'.$fk[0].'"},"hash":{"id":"'.$hk[1].'","key":"'.base64_encode($hk[0]).'"}}';
 	}
-	public static function checkPwdAndForm($id,$pwd1,$salt,$hash,$id2,$pwd2){
-		global $private_salt_key;
-		if(!self::validateForm($id2,$pwd2))
+	public function checkPwdAndForm($id,$pwd1,$salt,$hash,$id2,$pwd2){
+		global $options;
+		if(!$this->validateForm($id2,$pwd2)){
 			return 1;
-		$pwd = self::getPwdFromKey($id,$pwd1);
-		$hSalt = Password::hash($salt,$private_salt_key);
-		if(Password::hash($pwd,$hSalt)!=$hash)
+		}
+		$pwd = $this->getPwdFromKey($id,$pwd1);
+		$hSalt = Password::hash($salt,$options->get('private_salt_key'));
+		if(Password::hash($pwd,$hSalt)!=$hash){
 			return 2;
+		}
 		return false;
 	}
-	public static function isLoggedIn(){
+	public function isLoggedIn(){
+		global $sql;
+		if(!isset($_COOKIE['session-id']) || !isset($_COOKIE['PHPSESSID'])){
+			return false;
+		}
+		if($this->checkedSessKey){
+			return $_SESSION['id']!==false;
+		}
+		$res = $sql->query("SELECT session FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
+		if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$res['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
+			$_SESSION['id'] = false;
+			unset($_COOKIE['session-id']);
+			setcookie('session-id',null,-1);
+			return false;
+		}
+		if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])==$res['session'] && (isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
+			$_SESSION['overrideLoginCheck'] = false;
+		}
 		return $_SESSION['id']!==false;
 	}
 }
+$security = new Security();
 function getVar($s){
-	$r = sql::query("SELECT content FROM vars WHERE name='%s'",[$s],0);
+	global $sql;
+	$r = $sql->query("SELECT content FROM vars WHERE name='%s'",[$s],0);
 	//$r = $res -> fetch_assoc();
 	if(isset($r['content']))
 		return $r['content'];
 	return false;
 }
 function setVar($s,$c){
-	$r = sql::query("SELECT id FROM vars WHERE name='%s'",[$s],0);
+	global $sql;
+	$r = $sql->query("SELECT id FROM vars WHERE name='%s'",[$s],0);
 	//$r = $res -> fetch_assoc();
 	if(isset($r['id'])){
-		sql::query("UPDATE vars SET content='%s' WHERE name='%s'",[$c,$s]);
+		$sql->query("UPDATE vars SET content='%s' WHERE name='%s'",[$c,$s]);
 	}else{
-		sql::query("INSERT INTO vars (name,content) VALUES('%s','%s')",[$s,$c]);
+		$sql->query("INSERT INTO vars (name,content) VALUES('%s','%s')",[$s,$c]);
 	}
 }
 
@@ -221,12 +195,14 @@ class Analytics{
 		$this->params = array_merge($this->params,[$t,$s,$t,$t,$s,$s,$t]);
 	}
 	private function runQuery(){
-		sql::query($this->query,$this->params,true);
+		global $sql;
+		$sql->query($this->query,$this->params,true);
 		$this->query = '';
 		$this->params = [];
 	}
 	private function getData($t,$m,$y,$i = false){
-		$query = sql::query('SELECT counter AS c,path FROM analytics WHERE (type=%d AND MONTH(ts) = %d AND YEAR(ts) = %d) ORDER BY counter DESC LIMIT 10',[(int)$t,(int)$m,(int)$y]);
+		global $sql;
+		$query = $sql->query('SELECT counter AS c,path FROM analytics WHERE (type=%d AND MONTH(ts) = %d AND YEAR(ts) = %d) ORDER BY counter DESC LIMIT 10',[(int)$t,(int)$m,(int)$y]);
 		if($i===false){
 			return $query;
 		}
@@ -275,7 +251,7 @@ class Analytics{
 				'<br>'.$this->getAllTables($m,$y);
 	}
 	public function __construct(){
-		global $user_info,$fileExtention;
+		global $user_info,$fileExtention,$security;
 		$this->query = '';
 		$this->params = [];
 		$this->otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf'];
@@ -310,25 +286,26 @@ class Analytics{
 					$this->addNum(5,$ana_uri['host']);
 				}
 			}
-			if(security::isLoggedIn()){
+			if($security->isLoggedIn()){
 				$this->addNum(6,$user_info['name']);
 			}
 		}
 		$this->runQuery();
 	}
 }
-abstract class page{
-	private static function getImageNotFound() {
+class Page{
+	private function getImageNotFound() {
 		$img = imagecreatetruecolor(180,17);
 		imagestring($img,7,0,0,"Couldn't find image.",imagecolorallocate($img, 255, 255, 255));
 		return $img;
 	}
-	public static function do404() {
+	public function do404() {
 		header('HTTP/1.0 404 Not Found');
 		ob_end_clean();
 		return 'I just don\'t know what went wrong!';
 	}
-	private static function getQuickLinks($lang,$pathPartsParsed){
+	private function getQuickLinks($lang,$pathPartsParsed){
+		global $sql;
 		$quickLinks = '';
 		$temp = $pathPartsParsed;
 		$link = explode("/",$_SERVER['REQUEST_URI']);
@@ -347,8 +324,8 @@ abstract class page{
 					$query = "SELECT $getParams FROM pages WHERE refId=($query) AND name='%s'";
 				}
 			}
-			$page = sql::query($query,array_merge([$lang],$temp),0);
-			$name = $page['title_'.$lang];
+			$p = $sql->query($query,array_merge([$lang],$temp),0);
+			$name = $p['title_'.$lang];
 			if(!$name){
 				$goodlink = explode('.',$link[sizeof($temp)]);
 				$goodlink = explode('?',$goodlink[0]);
@@ -359,8 +336,8 @@ abstract class page{
 		}while(array_pop($temp) && count($temp)>0);
 		return substr('<a href="/">Home</a> &gt; '.$quickLinks,0,-6);
 	}
-	private static function getHeader($title,$lang,$pathPartsParsed,$headStuff = '',$id=0){
-		global $user_info;
+	private function getHeader($title,$lang,$pathPartsParsed,$headStuff = '',$id=0){
+		global $user_info,$security;
 		return '<!DOCTYPE html>'.
 			'<html>'.
 				'<head>'.
@@ -372,7 +349,7 @@ abstract class page{
 					'<script type="text/javascript" src="/jquery-2.0.3.min.js"></script>'.
 					'<script type="text/javascript" src="/jsencrypt.min.js"></script>'.
 					'<script type="text/javascript">'.
-						'LOGGEDIN='.(security::isLoggedIn()?'true':'false').';'.
+						'LOGGEDIN='.($security->isLoggedIn()?'true':'false').';'.
 						'function reLogIn(){'.
 							'$.getJSON("/getKeys").done(function(keys){'.
 								'var encrypt = new JSEncrypt();'.
@@ -447,7 +424,7 @@ abstract class page{
 						'<tr>'.
 							'<td style="width:50%;text-align:left"><a href="/rssfeed.php" target="_blank" quick="false"><img src="/20/*/media/rss.png" alt="RSS Feed"></a></td>'.
 							'<td style="width:50%;text-align:right">'.
-								(security::isLoggedIn()?
+								($security->isLoggedIn()?
 									'<b>'.$user_info['name'].'</b> ('.
 										($user_info['power']&8?'<a href="/analytics">Analytics</a> | ':'').
 										'<a quick="false" href="/account/logout">Log Out</a>)':
@@ -456,10 +433,10 @@ abstract class page{
 						'</tr>'.
 					'</table>'.
 					'<a href="/"><img src="/media/header.jpg" alt="Home"></a>'.
-					(security::isLoggedIn()?
+					($security->isLoggedIn()?
 						'<iframe src="/omnomirc/index.php" width="100%" height="280" frameborder="0" name="OmnomIRC"></iframe>':'').
 					'<div style="height:1em;">'.
-						'<div style="float:left;" id="quickLinks">'.self::getQuickLinks($lang,$pathPartsParsed).'</div>'.
+						'<div style="float:left;" id="quickLinks">'.$this->getQuickLinks($lang,$pathPartsParsed).'</div>'.
 						'<div style="float:right;" id="permalink"><a pageid="'.(int)$id.'">Permalink</a><input type="text" style="display:none"></input></div>'.
 						'<script type="text/javascript">'.
 							'(function(){'.
@@ -480,14 +457,14 @@ abstract class page{
 					'</div>'.
 					'<div id="content">';
 	}
-	private static function getFooter(){
-		global $queryNum;
+	private function getFooter(){
+		global $security,$sql;
 		return '</div>'.
 					'<script type="text/javascript">'.
 						'$("article").css("min-height",$("nav>ul").height()+20);'.
 					'</script>'.
 					'<footer>'.
-						'Page generated succesfully with <span id="queryNum">'.$queryNum.'</span> queries. ©Sorunome 2011-'.date('Y',time()).
+						'Page generated succesfully with <span id="queryNum">'.$sql->getQueryNum().'</span> queries. ©Sorunome 2011-'.date('Y',time()).
 					'</footer>'.
 					'</div>'.
 					'<script type="text/javascript">'.
@@ -502,23 +479,23 @@ abstract class page{
 							'});'.
 						'}'.
 						'parseLinks();'.
-						(isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!security::isLoggedIn()?'reLogIn();':'').
+						(isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn()?'reLogIn();':'').
 					'</script>'.
 				'</body>'.
 			'</html>';
 	}
-	public static function getNavInner($i=1,$path='',$admin=false){
-		global $lang;
+	public function getNavInner($i=1,$path='',$admin=false){
+		global $lang,$sql;
 		$s = '';
 		if($i==1){
 			$s .= '<li><a href="/"'.($admin?' class="page" pid="'.$i.'"':'').'>Home</a></li>';
 		}
-		$rows = sql::query("SELECT id,name,title_%s,settings FROM pages WHERE refId='%s' ORDER BY sorder ASC",[$lang,(string)$i]);
+		$rows = $sql->query("SELECT id,name,title_%s,settings FROM pages WHERE refId='%s' ORDER BY sorder ASC",[$lang,(string)$i]);
 		$i = 0;
 		while(isset($rows[$i]) && ($row = $rows[$i++])){
 			if($row['id']!=NULL && ($i!=1 || (int)$row['id']!=1) && ($row['settings'] & 2)==0){
 				$s .= '<li><a href="'.$path.'/'.$row['name'].'"'.($admin?' class="page" pid="'.$row['id'].'"':'').'>'.$row['title_'.$lang].'</a>';
-				$s .= self::getNavInner((int)$row['id'],$path.'/'.$row['name'],$admin);
+				$s .= $this->getNavInner((int)$row['id'],$path.'/'.$row['name'],$admin);
 				$s .= '</li>';
 			}
 		}
@@ -527,13 +504,13 @@ abstract class page{
 		}
 		return $s;
 	}
-	private static function getNav(){
-		global $lang,$user_info;
+	private function getNav(){
+		global $lang,$user_info,$security,$options;
 		if(isset($_GET['updateNav'])){
-			setVar('cache_nav_'.$lang,self::getNavInner());
+			setVar('cache_nav_'.$lang,$this->getNavInner());
 		}
-		$s = getVar('cache_nav_'.$lang);
-		return '<nav>'.$s.'</nav>'.(security::isLoggedIn() && $user_info['power']&16?'<script type="text/javascript">'.
+		$s = $options->get('cache_nav_'.$lang);
+		return '<nav>'.$s.'</nav>'.($security->isLoggedIn() && $user_info['power']&16?'<script type="text/javascript">'.
 				'$("nav > ul").append('.
 					'$("<li>")'.
 						'.append('.
@@ -544,7 +521,7 @@ abstract class page{
 				');'.
 			'</script>':'');
 	}
-	public static function cacheHeaders($s){
+	public function cacheHeaders($s){
 		if(isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) >= filemtime($s)){
 			header('HTTP/1.0 304 Not Modified');
 			exit;
@@ -553,33 +530,33 @@ abstract class page{
 		header('Expires: '.date('D, d M Y H:i:s e',strtotime('30 days')));
 		header('Cache-Control: max-age=2592000');
 	}
-	public static function getPage($title,$content,$lang,$pathPartsParsed,$settings = 1,$id = 0){
-		global $queryNum;
+	public function getPage($title,$content,$lang,$pathPartsParsed,$settings = 1,$id = 0){
+		global $sql,$security;
 		if(!isset($_GET['json'])){
 			$pageHTML = '';
 			if((int)$settings & 1){
-				$pageHTML.=self::getHeader($title,$lang,$pathPartsParsed,'',$id);
-				$pageHTML.=self::getNav();
+				$pageHTML.=$this->getHeader($title,$lang,$pathPartsParsed,'',$id);
+				$pageHTML.=$this->getNav();
 				$pageHTML.='<article>'.$content.'</article>';
-				$pageHTML.=self::getFooter();
+				$pageHTML.=$this->getFooter();
 			}else{
 				$pageHTML = $content;
 			}
 		}else{
 			header('Content-Type: text/json');
-			$quicklinksHTML = self::getQuickLinks($lang,$pathPartsParsed);
+			$quicklinksHTML = $this->getQuickLinks($lang,$pathPartsParsed);
 			$pageHTML = json_encode([
 				'title' => $title,
 				'content' => $content,
 				'quickLinks' => $quicklinksHTML,
-				'queries' => $queryNum,
-				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!security::isLoggedIn(),
+				'queries' => $sql->getQueryNum(),
+				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn(),
 				'id' => $id
 			]);
 		}
 		return $pageHTML;
 	}
-	public static function commentHTML($comment,$canComment,$depth=0){
+	public function commentHTML($comment,$canComment,$depth=0){
 		global $bbParser;
 		$timestamp = strtotime($comment['ts']);
 		return '<div style="margin-left:'.$depth.'px" class="comment">'.
@@ -590,8 +567,9 @@ abstract class page{
 					($canComment?'<a href="'.$comment['id'].'" class="reply">Reply</a>':'').
 				'</div>';
 	}
-	private static function getComments($pid,$canComment,$refId = -1,$depth = 0){
-		$res = sql::query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE pageId='%s' AND refId='%s' ORDER BY ts DESC",[$pid,$refId]);
+	private function getComments($pid,$canComment,$refId = -1,$depth = 0){
+		global $sql;
+		$res = $sql->query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE pageId='%s' AND refId='%s' ORDER BY ts DESC",[$pid,$refId]);
 		$temp = $res[0];
 		if($temp['id']==NULL && $refId == -1){
 			return 'no comments';
@@ -599,23 +577,24 @@ abstract class page{
 		$html = '';
 		foreach($res as $comment){
 			if($comment['id']!==NULL){
-				$html .= self::commentHTML($comment,$canComment,$depth);
-				$html .= self::getComments($pid,$canComment,$comment['id'],$depth+10);
+				$html .= $this->commentHTML($comment,$canComment,$depth);
+				$html .= $this->getComments($pid,$canComment,$comment['id'],$depth+10);
 			}
 		}
 		return $html;
 	}
-	public static function getPathFromId($id){
+	public function getPathFromId($id){
+		global $sql;
 		$pathParts = [];
 		do{
-			$res = sql::query("SELECT refId,name FROM pages WHERE id=%d",[(int)$id],0);
+			$res = $sql->query("SELECT refId,name FROM pages WHERE id=%d",[(int)$id],0);
 			$id = $res['refId'];
 			$pathParts[] = $res['name'];
 		}while($id!=1);
 		return '/'.implode('/',array_reverse($pathParts));
 	}
-	public static function getPageFromSQL($pathPartsParsed,$lang){
-		global $bbParser,$user_info;
+	public function getPageFromSQL($pathPartsParsed,$lang){
+		global $bbParser,$user_info,$sql,$security;
 		//var_dump($user_info);
 		if(isset($pathPartsParsed[0]) && $pathPartsParsed[sizeof($pathPartsParsed)-1]=='index'){
 			unset($pathPartsParsed[sizeof($pathPartsParsed)-1]);
@@ -638,10 +617,11 @@ abstract class page{
 				$query = "SELECT $getParams FROM pages WHERE refId=($query) AND name='%s'";
 			}
 		}
-		$page = sql::query($query,array_merge([$lang,$lang],$pathPartsParsed),0);
-		if($page['id']==1){ // index
+		$p = $sql->query($query,array_merge([$lang,$lang],$pathPartsParsed),0);
+		if($p['id']==1){ // index
 			$bbParser->addTag('news',function($type,$s,$attrs,$bbParser){
-				$res = sql::query("SELECT `news_en`,`ts`,`id` FROM news ORDER BY ts DESC",[]);
+				global $sql;
+				$res = $sql->query("SELECT `news_en`,`ts`,`id` FROM news ORDER BY ts DESC",[]);
 				$returnHTML = '<table style="background-color:#5D7859;border:1px solid black;border-collapse:collapse;"><tr><th>Date</th><th>News</th></tr>';
 				foreach($res as $r){
 					$returnHTML .= '<tr id="news'.$r['id'].'"><td style="border:1px solid black;border-collapse:collapse;">'.date('jS F Y',strtotime($r['ts'])).'</td><td style="border:1px solid black;border-collapse:collapse;">'.$bbParser->parse($r['news_en']).'</td></tr>';
@@ -649,9 +629,9 @@ abstract class page{
 				return $returnHTML.'</table>';
 			},[],'Creates the news table');
 		}
-		if($page['ts']!=NULL){
-			$html = $bbParser->parse($page['content_'.$lang],['*']);
-			if(security::isLoggedIn() && $user_info['power']&4){
+		if($p['ts']!=NULL){
+			$html = $bbParser->parse($p['content_'.$lang],['*']);
+			if($security->isLoggedIn() && $user_info['power']&4){
 				$html .= '<script type="text/javascript">'.
 							'$("article").prepend('.
 									'$("<div>")'.
@@ -662,7 +642,7 @@ abstract class page{
 												'.text("Edit")'.
 												'.click(function(e){'.
 													'e.preventDefault();'.
-													'$.getJSON("/edit/getBB&p='.$page['id'].'")'.
+													'$.getJSON("/edit/getBB&p='.$p['id'].'")'.
 														'.done(function(data){'.
 															'if(data.success){'.
 																'$("article")'.
@@ -687,7 +667,7 @@ abstract class page{
 																					'.text("Save")'.
 																					'.click(function(e){'.
 																						'e.preventDefault();'.
-																						'$.post("/edit/savePage?p='.$page['id'].'",{"c":$("article textarea").val()})'.
+																						'$.post("/edit/savePage?p='.$p['id'].'",{"c":$("article textarea").val()})'.
 																							'.done(function(data){'.
 																								'data = eval(data);'.
 																								'if(data.success){'.
@@ -712,11 +692,11 @@ abstract class page{
 								');'.
 						'</script>';
 			}
-			if($page['settings'] & 4){
-				$commentsHTML = self::getComments($page['id'],security::isLoggedIn() || $page['settings'] & 8);
+			if($p['settings'] & 4){
+				$commentsHTML = $this->getComments($p['id'],$security->isLoggedIn() || $p['settings'] & 8);
 				$html .= '<hr>'.
 						'<h2>Comments</h2>'.
-						(security::isLoggedIn() || $page['settings'] & 8?
+						($security->isLoggedIn() || $p['settings'] & 8?
 							'<span id="topComment"></span>':
 							'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!').
 						'<br>'.
@@ -732,7 +712,7 @@ abstract class page{
 												'"<br>",'.
 												'$("<form>")'.
 													'.append('.
-														(!security::isLoggedIn() && $page['settings'] & 8?
+														(!$security->isLoggedIn() && $p['settings'] & 8?
 															'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':'').
 														'$("<textarea>")'.
 															'.attr("maxlength","500")'.
@@ -740,7 +720,7 @@ abstract class page{
 														'$("<input>")'.
 															'.attr({"type":"text","name":"pageId"})'.
 															'.css("display","none")'.
-															'.val("'.$page['id'].'"),'.
+															'.val("'.$p['id'].'"),'.
 														'$("<input>")'.
 															'.attr({"type":"text","name":"refId"})'.
 															'.css("display","none")'.
@@ -755,7 +735,7 @@ abstract class page{
 														'var form = this;'.
 														'$.getJSON("/getKeys").done(function(keys){'.
 															'$.post("/comment",{'.
-																(!security::isLoggedIn() && $page['settings'] & 8?
+																(!$security->isLoggedIn() && $p['settings'] & 8?
 																	'name:$(form).find(\'[name="name"]\').val(),':'').
 																'comment:$(form).find("textarea").val(),'.
 																'pageId:$(form).find(\'[name="pageId"]\').val(),'.
@@ -776,24 +756,19 @@ abstract class page{
 						'</script>'.
 						'<br>';
 			}
-			echo self::getPage($page['title_'.$lang],$html,$lang,$pathPartsParsed,$page['settings'],$page['id']);
+			echo $this->getPage($p['title_'.$lang],$html,$lang,$pathPartsParsed,$p['settings'],$p['id']);
 		}else{
-			echo self::getPage('404 not found',self::do404(),$lang,$pathPartsParsed);
+			echo $this->getPage('404 not found',$this->do404(),$lang,$pathPartsParsed);
 		}
 	}
 }
+$page = new Page();
 
 if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<strpos($_SERVER['REQUEST_URI'],'?')){
 	$_GET['path'] .= 'index.php';
 }
-if(security::isLoggedIn()){ // grab user info
-	$user_info = sql::query("SELECT session,name,settings,power,id FROM users WHERE id='%s'",[$_SESSION['id']],0);
-	if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$user_info['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
-		$_SESSION['id'] = false;
-		unset($user_info);
-	}elseif(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])==$user_info['session'] && (isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
-		$_SESSION['overrideLoginCheck'] = false;
-	}
+if($security->isLoggedIn()){ // grab user info
+	$user_info = $sql->query("SELECT session,name,settings,power,id FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
 }
 if(isset($_COOKIE['shouldlogin'])){ // extend log in cookie
 	setcookie('shouldlogin', $_COOKIE['shouldlogin'], time()+3600*24*30,'/');
@@ -804,31 +779,31 @@ $pathPartsParsed = array();
 $fileExtention = '';
 foreach($pathParts as $part) {
 	if ($part) {
-		if (strpos($part,".")!==false) {
+		if (strpos($part,'.')!==false) {
 			$fileExtention = substr($part,strrpos($part,".")+1);
 			$part = substr($part,0,strrpos($part,"."));
 		}
 		$pathPartsParsed[] = str_replace(' ','+',$part);
 	}
 }
-$analytics = new Analytics();
 if(isset($_GET['pageid'])){ // direct page ID, http forward
-	header('Location: '.page::getPathFromId((int)$_GET['pageid']));
+	header('Location: '.$page->getPathFromId((int)$_GET['pageid']));
 	exit; // good bye
 }
+$analytics = new Analytics();
 switch($pathPartsParsed[0]){
 	case 'analytics':
-		if(security::isLoggedIn() && $user_info['power']&8){
+		if($security->isLoggedIn() && $user_info['power']&8){
 			if(isset($_GET['m']) && isset($_GET['y'])){
 				$pageHTML = '<h2>Analytics</h2><p><a href="/analytics">Back</a></p>';
 				$pageHTML .= $analytics->getMonth($_GET['m'],$_GET['y']);
 			}else{
-				$hits = sql::query('SELECT counter AS c,UNIX_TIMESTAMP(ts) AS time FROM analytics WHERE type=0 ORDER BY ts DESC');
-				$files = sql::query('SELECT counter AS c FROM analytics WHERE type=1 ORDER BY ts DESC');
-				$visits = sql::query('SELECT counter AS c FROM analytics WHERE type=3 ORDER BY ts DESC');
-				$hitsnb = sql::query('SELECT counter AS c FROM analytics WHERE type=7 ORDER BY ts DESC');
-				$filesnb = sql::query('SELECT counter AS c FROM analytics WHERE type=8 ORDER BY ts DESC');
-				$visitsnb = sql::query('SELECT counter AS c FROM analytics WHERE type=10 ORDER BY ts DESC');
+				$hits = $sql->query('SELECT counter AS c,UNIX_TIMESTAMP(ts) AS time FROM analytics WHERE type=0 ORDER BY ts DESC');
+				$files = $sql->query('SELECT counter AS c FROM analytics WHERE type=1 ORDER BY ts DESC');
+				$visits = $sql->query('SELECT counter AS c FROM analytics WHERE type=3 ORDER BY ts DESC');
+				$hitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=7 ORDER BY ts DESC');
+				$filesnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=8 ORDER BY ts DESC');
+				$visitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=10 ORDER BY ts DESC');
 				$pageHTML = '<h2>Analytics</h2><table class="statstable"><tr><th>Month</th><th>Hits</th><th>Pages</th><th>Visits</th></tr>';
 				for($i=0;$i<sizeof($hits);$i++){
 					$pageHTML .= '<tr><td><a href="/analytics?m='.date('m',$hits[$i]['time']).'&y='.date('Y',$hits[$i]['time']).'">'.date('F Y',$hits[$i]['time']).'</a></td><td>'.
@@ -847,21 +822,21 @@ switch($pathPartsParsed[0]){
 		}else{
 			$pageHTML = '<b>ERROR</b>: permission denied';
 		}
-		echo page::getPage('Analytics',$pageHTML,$lang,$pathPartsParsed);
+		echo $page->getPage('Analytics',$pageHTML,$lang,$pathPartsParsed);
 		break;
 	case 'getKeys':
 		header('Content-type: text/json');
-		echo security::makeKeysJSON();
+		echo $security->makeKeysJSON();
 		break;
 	case 'comment':
 		if(!isset($_POST['refId']) || !isset($_POST['pageId']) || !isset($_POST['comment']) || !isset($_POST['fid']) || !isset($_POST['fkey']))
 			die('Missing required field');
-		if(!security::validateForm($_POST['fid'],$_POST['fkey']))
+		if(!$security->validateForm($_POST['fid'],$_POST['fkey']))
 			die('ERROR: Invalid session, please refresh the page');
-		$page = sql::query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
-		if(!security::isLoggedIn() && !($page['settings'] & 8))
+		$p = $sql->query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
+		if(!$security->isLoggedIn() && !($p['settings'] & 8))
 			die('ERROR: You need to log in to post');
-		if(!security::isLoggedIn()){
+		if(!$security->isLoggedIn()){
 			if(strlen($_POST['name']) > 50)
 				die('ERROR: too long name');
 			if(!preg_match("/^[0-9a-zA-Z ]+$/",$_POST['name']))
@@ -874,36 +849,36 @@ switch($pathPartsParsed[0]){
 		}
 		if(strlen($_POST['comment']) > 500)
 			die('ERROR: Comment too long');
-		$page = sql::query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
-		if(!$page['settings'] & 4)
+		$p = $sql->query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
+		if(!$p['settings'] & 4)
 			die('ERROR: You can\'t post comments on this page');
-		sql::query("INSERT INTO comments (pageId,refId,userId,poster,content,allowedTags) VALUES ('%s','%s','%s','%s','%s','b,i,url')",
+		$sql->query("INSERT INTO comments (pageId,refId,userId,poster,content,allowedTags) VALUES ('%s','%s','%s','%s','%s','b,i,url')",
 			[(int)$_POST['pageId'],(int)$_POST['refId'],$uid,$name,$_POST['comment']]);
-		$id = sql::query("SELECT MAX(id) FROM comments",[],0);
-		$comment = sql::query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE id='%s'",[$id['MAX(id)']],0);
-		echo page::commentHTML($comment,true);
+		$id = $sql->query("SELECT MAX(id) FROM comments",[],0);
+		$comment = $sql->query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE id='%s'",[$id['MAX(id)']],0);
+		echo $page->commentHTML($comment,true);
 		break;
 	case 'account':
 		if(isset($pathPartsParsed[1])){
 			switch($pathPartsParsed[1]){
 				case 'key':
-					$user = sql::query("SELECT randkey,power FROM users WHERE id='%s'",[$_GET['i']],0);
+					$user = $sql->query("SELECT randkey,power FROM users WHERE id='%s'",[$_GET['i']],0);
 					$pageHTML = '';
 					if(isset($user['randkey']) && $user['randkey']==$_GET['k']){
 						if(!$user['power']&1){
 							$user['power'] = ((int)$user['power']|1);
 							$pageHTML='Activated account, now you can <a href="/account/login">log in</a>.';
 						}
-						sql::query("UPDATE users SET randkey='',power='%s' WHERE id='%s'",[$user['power'],$_GET['i']]);
+						$sql->query("UPDATE users SET randkey='',power='%s' WHERE id='%s'",[$user['power'],$_GET['i']]);
 					}else{
 						$pageHTML='<b>ERROR</b> invalid key</b>';
 					}
-					echo page::getPage('Account Key',$pageHTML,$lang,$pathPartsParsed);
+					echo $page->getPage('Account Key',$pageHTML,$lang,$pathPartsParsed);
 					break;
 				case 'logout':
 					$_SESSION['id'] = false;
 					session_destroy();
-					echo page::getPage('Log Out','You are now logged out.'.
+					echo $page->getPage('Log Out','You are now logged out.'.
 						'<script type="text/javascript">'.
 							'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
 							'document.cookie="session-id=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
@@ -916,17 +891,17 @@ switch($pathPartsParsed[0]){
 					if(isset($_GET['ltpwdv'])){
 						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']) || !isset($_POST['uid']))
 							die('{"success":false}');
-						$user = sql::query("SELECT id,power,longtimepwd,longtimesalt FROM users WHERE id='%s'",[$_POST['uid']],0);
+						$user = $sql->query("SELECT id,power,longtimepwd,longtimesalt FROM users WHERE id='%s'",[$_POST['uid']],0);
 						if(!isset($user['id']))
 							die('{"success":false}');
-						if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['longtimesalt'],$user['longtimepwd'],$_POST['fid'],$_POST['fkey']))
+						if($security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['longtimesalt'],$user['longtimepwd'],$_POST['fid'],$_POST['fkey']))
 							die('{"success":false}');
 						if(!$user['power']&1)
 							die('{"success":false}');
 						$_SESSION['id'] = $user['id'];
 						$_SESSION['overrideLoginCheck'] = true;
-						$session_id = security::generateRandomString(50);
-						sql::query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						$session_id = $security->generateRandomString(50);
+						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
 						echo json_encode([
 							'success' => true,
 							'sessid' => $session_id
@@ -934,33 +909,33 @@ switch($pathPartsParsed[0]){
 					}elseif(isset($_GET['ltpwd'])){
 						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']))
 							die('{"success":false,"message":"ERROR: Missing required field"}');
-						if(!security::isLoggedIn())
+						if(!$security->isLoggedIn())
 							die('{"success":false,"message":"ERROR: Not logged in"}');
-						if(!security::validateForm($_POST['fid'],$_POST['fkey']))
+						if(!$security->validateForm($_POST['fid'],$_POST['fkey']))
 							die('{"success":false,"message":"ERROR: Invalid session, please refresh the page"}');
 						if(!$user_info['power']&1)
 							die('{"success":false,"message":"ERROR: Account not activated!"}');
-						$pwd = security::getPwdFromKey($_POST['id'],$_POST['pwd']);
+						$pwd = $security->getPwdFromKey($_POST['id'],$_POST['pwd']);
 						if(strlen($pwd)<1)
 							die('{"success":false,"message":"ERROR: No password entered!"}');
 						$salt = Password::generateSalt(50);
-						$hSalt = Password::hash($salt,$private_salt_key);
+						$hSalt = Password::hash($salt,$options->get('private_salt_key'));
 						$hash = Password::hash($pwd,$hSalt);
-						sql::query("UPDATE users SET longtimepwd='%s',longtimesalt='%s' WHERE id='%s'",[$hash,$salt,$_SESSION['id']]);
+						$sql->query("UPDATE users SET longtimepwd='%s',longtimesalt='%s' WHERE id='%s'",[$hash,$salt,$_SESSION['id']]);
 						echo '{"success":true,"message":"Success","id":"'.$_SESSION['id'].'"}';
 					}else{
 						if(!isset($_POST['name']) || !isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fkey']) || !isset($_POST['fid']))
 							die('{"success":false,"message":"ERROR: Missing required field"}');
-						$user = sql::query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
+						$user = $sql->query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
 						if(!isset($user['id']))
 							die('{"success":false,"message":"ERROR: User doesn\'t exist!"}');
 						if(!$user['power']&1)
 							die('{"success":false,"message":"ERROR: Account not activated!"}');
-						if(security::checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
+						if($security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
 							die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
 						$_SESSION['id'] = $user['id'];
-						$session_id = security::generateRandomString(50);
-						sql::query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						$session_id = $security->generateRandomString(50);
+						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
 						echo json_encode([
 							'success' => true,
 							'message' => 'Success',
@@ -977,21 +952,21 @@ switch($pathPartsParsed[0]){
 						die('ERROR: Not a valid email!');
 					if(!preg_match("/^[0-9a-zA-Z ]+$/",$_POST['name']))
 						die('ERROR: Not a valid username!');
-					$user = sql::query("SELECT id FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
+					$user = $sql->query("SELECT id FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
 					if(isset($user['id']))
 						die('ERROR: Duplicate username');
-					$pwd = security::getPwdFromKey($_POST['id'],$_POST['pwd']);
+					$pwd = $security->getPwdFromKey($_POST['id'],$_POST['pwd']);
 					if(strlen($pwd)<1)
 						die('ERROR: No password entered!');
-					if(!security::validateForm($_POST['fid'],$_POST['fkey']))
+					if(!$security->validateForm($_POST['fid'],$_POST['fkey']))
 						die('ERROR: Invalid session, please refresh the page');
-					$activationKey = security::generateRandomString(50);
+					$activationKey = $security->generateRandomString(50);
 					$salt = Password::generateSalt(50);
-					$hSalt = Password::hash($salt,$private_salt_key);
+					$hSalt = Password::hash($salt,$options->get('private_salt_key'));
 					$hash = Password::hash($pwd,$hSalt);
-					sql::query("INSERT INTO users (name,passwd,salt,email,randkey,joindate) VALUES ('%s','%s','%s','%s','%s','%s')",
+					$sql->query("INSERT INTO users (name,passwd,salt,email,randkey,joindate) VALUES ('%s','%s','%s','%s','%s','%s')",
 						[$_POST['name'],$hash,$salt,$_POST['email'],$activationKey,time()]);
-					$id = sql::query("SELECT id FROM users WHERE name='%s'",[$_POST['name']],0);
+					$id = $sql->query("SELECT id FROM users WHERE name='%s'",[$_POST['name']],0);
 					$mailMessage = implode([
 						'Hey there '.$_POST['name'].',',
 						'',
@@ -1007,7 +982,7 @@ switch($pathPartsParsed[0]){
 					echo 'Sent verification email, please check your spam folder!';
 					break;
 				default:
-					page::getPageFromSQL($pathPartsParsed,$lang);
+					$page->getPageFromSQL($pathPartsParsed,$lang);
 					break;
 			}
 		}else{
@@ -1019,12 +994,12 @@ switch($pathPartsParsed[0]){
 			switch($pathPartsParsed[1]){
 				case 'getBB':
 					header('Content-type: text/json');
-					$page = sql::query("SELECT content_$lang FROM pages WHERE id='%s'",[$_GET['p']],0);
-					if(security::isLoggedIn() && $user_info['power']&4){
-						if($page['content_'.$lang]){
+					$p = $sql->query("SELECT content_$lang FROM pages WHERE id='%s'",[$_GET['p']],0);
+					if($security->isLoggedIn() && $user_info['power']&4){
+						if($p['content_'.$lang]){
 							echo json_encode([
 								'success' => true,
-								'code' => $page['content_'.$lang]
+								'code' => $p['content_'.$lang]
 							]);
 						}else{
 							die('{"success":false,"code":"ERROR: page not found"}');
@@ -1035,8 +1010,8 @@ switch($pathPartsParsed[0]){
 					break;
 				case 'savePage':
 					header('Content-type: text/json');
-					if(security::isLoggedIn() && $user_info['power']&4){
-						sql::query("UPDATE pages SET content_$lang='%s' WHERE id='%s'",[$_POST['c'],$_GET['p']]);
+					if($security->isLoggedIn() && $user_info['power']&4){
+						$sql->query("UPDATE pages SET content_$lang='%s' WHERE id='%s'",[$_POST['c'],$_GET['p']]);
 						echo('{"success":true,"message":"success"}');
 					}else{
 						die('{"success":false,"message":"ERROR: You may not edit pages"}');
@@ -1046,9 +1021,9 @@ switch($pathPartsParsed[0]){
 					if(isset($_GET['new'])){
 						
 					}else{
-						if(security::isLoggedIn() && $user_info['power']&16){
+						if($security->isLoggedIn() && $user_info['power']&16){
 							$pageHTML = '';
-							$pageHTML .= page::getNavInner(1,'',true);
+							$pageHTML .= $page->getNavInner(1,'',true);
 							$pageHTML .= '<script type="text/javascript">'.
 									'$(".page")'.
 										'.after('.
@@ -1063,9 +1038,9 @@ switch($pathPartsParsed[0]){
 												')'.
 										');'.
 								'</script>';
-							echo page::getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
+							echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
 						}else{
-							echo page::getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
+							echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
 						}
 					}
 			}
@@ -1084,11 +1059,11 @@ switch($pathPartsParsed[0]){
 					header('Content-Length: '.filesize($_SERVER['DOCUMENT_ROOT'].$fullPath));
 					readfile($_SERVER['DOCUMENT_ROOT'].$fullPath);
 				}else{
-					echo page::getPage('404 not found',page::do404(),$lang,$pathPartsParsed);
+					echo $page->getPage('404 not found',$page->do404(),$lang,$pathPartsParsed);
 				}
 				break;
 			case 'mp3':
-				page::cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
+				$page->cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
 				if(file_exists($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					header('Content-Type: audio/mpeg');
 					header('Content-length: '.filesize($fullPath));
@@ -1100,12 +1075,12 @@ switch($pathPartsParsed[0]){
 				break;
 			case 'css':
 			case 'js':
-				page::cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
+				$page->cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
 				if($file = @file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					header('Content-Type: text/'.$fileExtention);
 					echo $file;
 				}else{
-					echo page::getPage('404 not found',page::do404(),$lang,$pathPartsParsed);
+					echo $page->getPage('404 not found',$page->do404(),$lang,$pathPartsParsed);
 				}
 				break;
 			case 'jpg':
@@ -1122,7 +1097,7 @@ switch($pathPartsParsed[0]){
 					unset($pathPartsParsed[1]);
 				}
 				$imgFileName = $_SERVER['DOCUMENT_ROOT'].'/'.join('/',$pathPartsParsed).'.'.$fileExtention;
-				page::cacheHeaders($imgFileName);
+				$page->cacheHeaders($imgFileName);
 				list($width,$height) = @getimagesize($imgFileName);
 				if ($imgNewHeight == -1 && $imgNewWidth == -1) {
 					$imgNewHeight = $height;
@@ -1174,21 +1149,21 @@ switch($pathPartsParsed[0]){
 				}
 				break;
 			case 'gif':
-				page::cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
+				$page->cacheHeaders($_SERVER['DOCUMENT_ROOT'].$fullPath);
 				if($file = file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					header('Content-Type: image/'.$fileExtention);
 					echo $file;
 				}else{
-					echo page::getPage('404 not found',page::do404(),$lang,$pathPartsParsed);
+					echo $page->getPage('404 not found',$page->do404(),$lang,$pathPartsParsed);
 				}
 				break;
 			case 'php':
 				if($fullPath!='/index.php' && $file = @file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					session_write_close();
-					include($_SERVER['DOCUMENT_ROOT'].$fullPath);
+					include_once($_SERVER['DOCUMENT_ROOT'].$fullPath);
 					break;
 				}
-				page::getPageFromSQL($pathPartsParsed,$lang);
+				$page->getPageFromSQL($pathPartsParsed,$lang);
 				break;
 			default:
 				ob_end_clean();
@@ -1196,7 +1171,7 @@ switch($pathPartsParsed[0]){
 					header('Content-Type: text/'.$fileExtention);
 					echo $file;
 				}else{
-					page::getPageFromSQL($pathPartsParsed,$lang);
+					$page->getPageFromSQL($pathPartsParsed,$lang);
 				}
 				break;
 		}
