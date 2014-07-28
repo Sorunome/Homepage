@@ -7,11 +7,11 @@ class Sql{
 		$this->mysqliConnection = false;
 	}
 	private function connectSql(){
-		global $options;
+		global $vars;
 		if($this->mysqliConnection !== false){
 			return $this->mysqliConnection;
 		}
-		$mysqli = new mysqli($options->get('sql_host'),$options->get('sql_user'),$options->get('sql_password'),$options->get('sql_database'));
+		$mysqli = new mysqli($vars->get('sql_host'),$vars->get('sql_user'),$vars->get('sql_password'),$vars->get('sql_database'));
 		if ($mysqli->connect_errno){
 			die('Could not connect to SQL DB: '.$mysqli->connect_errno.' '.$mysqli->connect_error);
 		}

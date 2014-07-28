@@ -16,7 +16,7 @@ echo '<?xml version="1.0" encoding="UTF-8" ?>';
 <managingEditor>mail@sorunome.de</managingEditor>
 <webMaster>mail@sorunome.de</webMaster>
 <?php
-$res = sql::query("SELECT `id`,`news_en`,`ts` FROM news ORDER BY ts DESC LIMIT 5");
+$res = $sql->query("SELECT `id`,`news_en`,`ts` FROM news ORDER BY ts DESC LIMIT 5");
 foreach($res as $r){
 	echo '<item>
 <title>'.date('jS F Y',strtotime($r['ts'])).'</title>

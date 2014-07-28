@@ -4,7 +4,7 @@ ini_set('display_startup_errors',1);
 error_reporting(-1);
 session_start();
 include_once('scrypt.php');
-include_once('options.php');
+include_once('vars.php');
 include_once('sql.php');
 if((!isset($_SESSION['checkedCookies']) || !$_SESSION['checkedCookies']) && !isset($_GET['overrideCookieCheck']) && (!isset($_COOKIE['haveCookies']) || !$_COOKIE['haveCookies'])){
 	$_SESSION['haveCookies'] = true;
@@ -110,12 +110,12 @@ class Security{
 		return '{"form":{"id":"'.$fk[1].'","key":"'.$fk[0].'"},"hash":{"id":"'.$hk[1].'","key":"'.base64_encode($hk[0]).'"}}';
 	}
 	public function checkPwdAndForm($id,$pwd1,$salt,$hash,$id2,$pwd2){
-		global $options;
+		global $vars;
 		if(!$this->validateForm($id2,$pwd2)){
 			return 1;
 		}
 		$pwd = $this->getPwdFromKey($id,$pwd1);
-		$hSalt = Password::hash($salt,$options->get('private_salt_key'));
+		$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
 		if(Password::hash($pwd,$hSalt)!=$hash){
 			return 2;
 		}
@@ -143,24 +143,6 @@ class Security{
 	}
 }
 $security = new Security();
-function getVar($s){
-	global $sql;
-	$r = $sql->query("SELECT content FROM vars WHERE name='%s'",[$s],0);
-	//$r = $res -> fetch_assoc();
-	if(isset($r['content']))
-		return $r['content'];
-	return false;
-}
-function setVar($s,$c){
-	global $sql;
-	$r = $sql->query("SELECT id FROM vars WHERE name='%s'",[$s],0);
-	//$r = $res -> fetch_assoc();
-	if(isset($r['id'])){
-		$sql->query("UPDATE vars SET content='%s' WHERE name='%s'",[$c,$s]);
-	}else{
-		$sql->query("INSERT INTO vars (name,content) VALUES('%s','%s')",[$s,$c]);
-	}
-}
 
 
 include_once('bbCodeParser.php');
@@ -484,42 +466,61 @@ class Page{
 				'</body>'.
 			'</html>';
 	}
-	public function getNavInner($i=1,$path='',$admin=false){
+	private function createNavInner($i=1,$path=''){
 		global $lang,$sql;
+		$pages = [];
 		$s = '';
 		if($i==1){
-			$s .= '<li><a href="/"'.($admin?' class="page" pid="'.$i.'"':'').'>Home</a></li>';
+			$pages[] = [
+				'name' => 'Home',
+				'href' => '/',
+				'inner' => []
+			];
 		}
 		$rows = $sql->query("SELECT id,name,title_%s,settings FROM pages WHERE refId='%s' ORDER BY sorder ASC",[$lang,(string)$i]);
 		$i = 0;
 		while(isset($rows[$i]) && ($row = $rows[$i++])){
 			if($row['id']!=NULL && ($i!=1 || (int)$row['id']!=1) && ($row['settings'] & 2)==0){
-				$s .= '<li><a href="'.$path.'/'.$row['name'].'"'.($admin?' class="page" pid="'.$row['id'].'"':'').'>'.$row['title_'.$lang].'</a>';
-				$s .= $this->getNavInner((int)$row['id'],$path.'/'.$row['name'],$admin);
-				$s .= '</li>';
+				$pages[] = [
+					'name' => $row['title_'.$lang],
+					'href' => $path.'/'.$row['name'],
+					'inner' => $this->createNavInner((int)$row['id'],$path.'/'.$row['name'])
+				];
 			}
 		}
-		if($s!=''){
+		return $pages;
+	}
+	private function createNav(){
+		return [
+			'name' => 'root',
+			'href' => '/',
+			'inner' => $this->createNavInner()
+		];
+	}
+	private function createNavHTML($obj){
+		$s = '';
+		foreach($obj as $o){
+			$s .= '<li><a href="'.$o['href'].'">'.$o['name'].'</a>'.$this->createNavHTML($o['inner']).'</li>';
+		}
+		if($s!==''){
 			$s = '<ul>'.$s.'</ul>';
 		}
 		return $s;
 	}
 	private function getNav(){
-		global $lang,$user_info,$security,$options;
+		global $lang,$user_info,$security,$vars;
 		if(isset($_GET['updateNav'])){
-			setVar('cache_nav_'.$lang,$this->getNavInner());
+			$vars->set('cache_nav_'.$lang,$this->createNav());
 		}
-		$s = $options->get('cache_nav_'.$lang);
-		return '<nav>'.$s.'</nav>'.($security->isLoggedIn() && $user_info['power']&16?'<script type="text/javascript">'.
-				'$("nav > ul").append('.
-					'$("<li>")'.
-						'.append('.
-							'$("<a>")'.
-								'.attr("href","/edit/structure")'.
-								'.text("Edit")'.
-						')'.
-				');'.
-			'</script>':'');
+		$navJSON = $vars->get('cache_nav_'.$lang);
+		if($security->isLoggedIn() && $user_info['power']&16){
+			$navJSON['inner'][] = [
+				'name' => 'Edit',
+				'href' => '/edit/structure',
+				'inner' => []
+			];
+		}
+		return '<nav>'.$this->createNavHTML($navJSON['inner']).'</nav>';
 	}
 	public function cacheHeaders($s){
 		if(isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) >= filemtime($s)){
@@ -919,7 +920,7 @@ switch($pathPartsParsed[0]){
 						if(strlen($pwd)<1)
 							die('{"success":false,"message":"ERROR: No password entered!"}');
 						$salt = Password::generateSalt(50);
-						$hSalt = Password::hash($salt,$options->get('private_salt_key'));
+						$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
 						$hash = Password::hash($pwd,$hSalt);
 						$sql->query("UPDATE users SET longtimepwd='%s',longtimesalt='%s' WHERE id='%s'",[$hash,$salt,$_SESSION['id']]);
 						echo '{"success":true,"message":"Success","id":"'.$_SESSION['id'].'"}';
@@ -962,7 +963,7 @@ switch($pathPartsParsed[0]){
 						die('ERROR: Invalid session, please refresh the page');
 					$activationKey = $security->generateRandomString(50);
 					$salt = Password::generateSalt(50);
-					$hSalt = Password::hash($salt,$options->get('private_salt_key'));
+					$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
 					$hash = Password::hash($pwd,$hSalt);
 					$sql->query("INSERT INTO users (name,passwd,salt,email,randkey,joindate) VALUES ('%s','%s','%s','%s','%s','%s')",
 						[$_POST['name'],$hash,$salt,$_POST['email'],$activationKey,time()]);

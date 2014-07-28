@@ -186,6 +186,9 @@ class bbParser {
 			if($br)
 				$newS = str_replace("\n",'<br>',$newS);
 		}
+		$newS = str_replace("\n",'',$newS);
+		$newS = str_replace("\r",'',$newS);
+		$newS = str_replace("\t",'',$newS);
 		return $newS;
 	}
 }

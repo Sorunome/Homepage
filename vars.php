@@ -1,5 +1,5 @@
 <?php
-class Options{
+class Vars{
 	private $config;
 	public function __construct(){
 		$cfg = explode("\n",file_get_contents(realpath(dirname(__FILE__))."/config.php"));
@@ -156,5 +156,5 @@ class Options{
 		return false;
 	}
 }
-$options = new Options();
+$vars = new Vars();
 ?>
