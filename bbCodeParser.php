@@ -4,27 +4,28 @@ class bbParserTag {
 	private $functionToCall;
 	private $attrs;
 	private $help;
-	public function returnBB($type,$s,$attrs,$p) {
+	public function returnBB($type,$s,$attrs,$p){
 		$str = "";
-		foreach ($attrs as $attr => $cont) {
+		foreach($attrs as $attr => $cont){
 			if ($cont!=NULL)
 				$str .= " $attr=$cont";
 			else
 				unset($attrs[$attr]);
 		}
-		if (isset($attrs[$type]))
-			return "[".substr($str,1)."]".$p->parse($s)."[/$type]";
-		return "[$type$str]".$p->parse($s)."[/$type]";
+		if(isset($attrs[$type])){
+			return '['.htmlspecialchars(substr($str,1)).']'.$p->parse($s).'[/'.htmlspecialchars($type).']';
+		}
+		return '['.htmlspecialchars($type.$str).']'.$p->parse($s).'[/'.htmlspecialchars($type).']';
 	}
-	private function inArray($a,$v) {
-		foreach ($a as $e) {
-			if ($e==$v) {
+	private function inArray($a,$v){
+		foreach($a as $e){
+			if($e==$v){
 				return true;
 			}
 		}
 		return false;
 	}
-	private function correctAttrs($t,$a) {
+	private function correctAttrs($t,$a){
 		foreach ($a as $key => $value) {
 			if (!$this->inArray($this->attrs,$key))
 				if (!($key==$t && $value==NULL))
@@ -32,13 +33,13 @@ class bbParserTag {
 		}
 		return true;
 	}
-	public function __construct($t,$f,$a,$h) {
+	public function __construct($t,$f,$a,$h){
 		$this->type = $t;
 		$this->functionToCall = $f;
 		$this->attrs = $a;
 		$this->help = $h;
 	}
-	public function getHTML($t,$s,$a,$p) {
+	public function getHTML($t,$s,$a,$p){
 		if ($t!=$this->type) return false;
 		$fn = $this->functionToCall;
 		if ($this->correctAttrs($t,$a))
@@ -46,7 +47,7 @@ class bbParserTag {
 		else
 			return $this->returnBB($t,$s,$a,$p);
 	}
-	public function isType($t) {
+	public function isType($t){
 		if ($t==$this->type)
 			return true;
 		return false;
@@ -55,7 +56,7 @@ class bbParserTag {
 class bbParser {
 	private $tags = Array();
 	private $allowedTags = Array('*');
-	public function returnBB($t,$s,$a) {
+	public function returnBB($t,$s,$a){
 		return $this->tags[0]->returnBB($t,$s,$a,$this);
 	}
 	private function getTagContent($type,$s,$attrs) {
@@ -122,7 +123,7 @@ class bbParser {
 		$i = 0;
 		foreach($matches as $match){ // grab all tags
 			$tags[$i]["start"] = $match[0][1];
-			$tags[$i]["type"] = $match[2][0];
+			$tags[$i]["type"] = strtolower($match[2][0]);
 			$tags[$i]["attribute"] = substr($match[3][0],1);
 			$tags[$i]["end"] = $match[5][1];
 			$tags[$i]["endTagPos"] = -1;
@@ -137,15 +138,17 @@ class bbParser {
 				}else{
 					$lastPos = strlen($s);
 				}
-				if($find = strpos(substr(strtolower($s),$startPos,$lastPos-$startPos),"[/".$tags[$i]["type"]."]")){ // find the end tag, if it exists
-					$lastFind = $tags[$j]["endTagPos"]-$startPos;
+				if($find = strpos(substr(strtolower($s),$startPos,$lastPos-$startPos),'[/'.$tags[$i]['type'].']')){ // find the end tag, if it exists
+					$lastFind = $tags[$j]['endTagPos']-$startPos;
 					if($find!=$lastFind) {
-						$tags[$i]["endTagPos"] = $find+$startPos;
+						$tags[$i]['endTagPos'] = $find+$startPos;
 						break;
 					}else{
 						$startPos += $find+1;
 						$j--;
 					}
+				}else{
+					$tags[$i]['endTagPos'] = strlen($s);
 				}
 			}
 		}
@@ -171,13 +174,12 @@ class bbParser {
 				$newS = str_replace("\n",'<br>',$newS);
 			}
 			for($i = 0;$i<sizeof($tags);$i++){ // loop through all tags
+				
+				$attrs = $this->getAttributes(substr($s,$tags[$i]['start']+1,$tags[$i]['end']-$tags[$i]['start']-2)); // fetch the attributes of the tag
 				if(($this->allowedTags[0] == '*' xor in_array($tags[$i]['type'],$this->allowedTags))){ // check if tag is allowed
-					$attrs = $this->getAttributes(substr($s,$tags[$i]['start']+1,$tags[$i]['end']-$tags[$i]['start']-2)); // fetch the attributes of the tag
 					$newS .= $this->getTagContent($tags[$i]['type'],substr($s,$tags[$i]['end'],$tags[$i]['endTagPos']-$tags[$i]['end']),$attrs); // parse it to the handler
 				}else{
-					$newS .= htmlspecialchars(substr($s,$tags[$i]['start'],$tags[$i]['end']-$tags[$i]['start'])).
-							$this->parse(substr($s,$tags[$i]['end'],$tags[$i]['endTagPos']-$tags[$i]['end'])).
-							htmlspecialchars(substr($s,$tags[$i]['endTagPos'],strlen($tags[$i]['type'])+3)); // well, just return the tag how it was before
+					$newS .= $this->returnBB($tags[$i]['type'],substr($s,$tags[$i]['end'],$tags[$i]['endTagPos']-$tags[$i]['end']),$attrs); // well, just return the tag how it was before
 				}
 				if($i<sizeof($tags)-1){ // escape text before tag
 					$temp = $tags[$i]['endTagPos']+strlen($tags[$i]['type'])+3;
