@@ -121,7 +121,7 @@ class Vars{
 		if(isset($r['id'])){ //check if we need to update or add a new
 			$sql->query("UPDATE vars SET value='%s',type='%s' WHERE name='%s'",[$c,$type,$s]);
 		}else{
-			$sql->query("INSERT INTO vars (name,value,type) VALUES('%s','%s')",[$s,$c,$type]);
+			$sql->query("INSERT INTO vars (name,value,type) VALUES('%s','%s',%d)",[$s,$c,(int)$type]);
 		}
 		return true;
 	}

@@ -74,6 +74,12 @@ $bbParser->addTag('instructables',function($type,$s,$attrs,$bbParser){
 		return $bbParser->returnBB($type,$s,$attrs);
 	return '<div id="iblemain"></div><script type="text/javascript" src="http://ibles.sorunome.de/ible.php?id='.$s.'&idPrev=ible&js"></script>';
 },[],'Instructables embed');
+$bbParser->addTag('instruction',function($type,$s,$attrs,$bbParser){
+	if(!preg_match('/^[0-9]+$/',$s)){
+		return $bbParser->returnBB($type,$s,$attrs);
+	}
+	return '<div id="instructionInstructionMain"></div><script type="text/javascript" src="http://www.sorunome.de/webdeveloping/instruction/?id='.$s.'&idPrev=instruction&js"></script>';
+},[],'makes an instruction');
 $bbParser->addTag('html',function($type,$s,$attrs,$bbParser){
 	return $s;
 },[],'HTML');

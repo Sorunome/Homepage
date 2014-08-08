@@ -236,7 +236,7 @@ class Analytics{
 		global $user_info,$fileExtention,$security;
 		$this->query = '';
 		$this->params = [];
-		$this->otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf'];
+		$this->otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf','wav'];
 		$this->addNum(0);
 		$isNoBot = (isset($_SERVER['HTTP_USER_AGENT']) && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'bot')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'spider')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'crawl')===false);
 		if($isNoBot){
@@ -1019,34 +1019,19 @@ switch($pathPartsParsed[0]){
 					}
 					break;
 				case 'structure':
-					if(isset($_GET['new'])){
-						
-					}else{
-						if($security->isLoggedIn() && $user_info['power']&16){
-							$pageHTML = '';
-							$pageHTML .= $page->getNavInner(1,'',true);
-							$pageHTML .= '<script type="text/javascript">'.
-									'$(".page")'.
-										'.after('.
-											'$("<div>")'.
-												'.append('.
-													'$("<a>")'.
-														'.text("new")'.
-														'.click(function(e){'.
-															'e.preventDefault();'.
-															''.
-														'})'.
-												')'.
-										');'.
-								'</script>';
-							echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
+					if($security->isLoggedIn() && $user_info['power']&16){
+						if(isset($_GET['new'])){
+							
 						}else{
-							echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
+							$pageHTML = 'too lazy to program right now';
+							echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
 						}
+					}else{
+						echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
 					}
 			}
 		}else{
-			echo 'nope';
+			echo $page->getPage('Nope','<script type="text/javascript">getPageJSON("/");</script>Redirecting...',$lang,$pathPartsParsed);
 		}
 		break;
 	default:
