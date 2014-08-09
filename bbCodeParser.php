@@ -120,15 +120,14 @@ class bbParser {
 		}
 		preg_match_all('/()\[([a-zA-Z0-9]+)(|=[^\]\[]+)( [^\]\[]+=[^\]\[]+)*\]()/i',$s,$matches,PREG_SET_ORDER | PREG_OFFSET_CAPTURE); // find all start tags
 		$tags = Array();
-		$i = 0;
 		foreach($matches as $match){ // grab all tags
-			$tags[$i]["start"] = $match[0][1];
-			$tags[$i]["type"] = strtolower($match[2][0]);
-			$tags[$i]["attribute"] = substr($match[3][0],1);
-			$tags[$i]["end"] = $match[5][1];
-			$tags[$i]["endTagPos"] = -1;
-			$tags[$i]["resultHTML"] = "";
-			$i++;
+			$tags[] = Array(
+					'start' => $match[0][1],
+					'type' => strtolower($match[2][0]),
+					'attribute' => substr($match[3][0],1),
+					'end' => $match[5][1],
+					'endTagPos' => -1
+				);
 		}
 		for($i = sizeof($tags)-1;$i>=0;$i--){ // find the corresponding close tag, pay attention to nesting and store the size of the string inside
 			$startPos = $tags[$i]["start"];
@@ -184,9 +183,6 @@ class bbParser {
 				if($i<sizeof($tags)-1){ // escape text before tag
 					$temp = $tags[$i]['endTagPos']+strlen($tags[$i]['type'])+3;
 					$temp2 = htmlspecialchars(substr($s,$temp,$tags[$i+1]['start']-$temp));
-					if($temp2 != '' && $temp2[0] == "\n"){ // don't have a <br> on initial linebreak
-						$temp2 = substr($temp2,1);
-					}
 					if($br){
 						$newS .= str_replace("\n",'<br>',$temp2);
 					}else{
@@ -195,9 +191,6 @@ class bbParser {
 				}
 				if($i == sizeof($tags)-1){ // escape text after last tag
 					$temp2 = htmlspecialchars(substr($s,$tags[$i]['endTagPos']+strlen($tags[$i]['type'])+3));
-					if($temp2 != '' && $temp2[0] == "\n"){ // don't have a <br> on initial linebreak
-						$temp2 = substr($temp2,1);
-					}
 					if($br){
 						$newS .= str_replace("\n",'<br>',$temp2);
 					}else{
@@ -215,13 +208,6 @@ class bbParser {
 		$newS = str_replace("\n",'',$newS); // HTML doesn't need these, so get rid of 'em
 		$newS = str_replace("\r",'',$newS);
 		$newS = str_replace("\t",'',$newS);
-		
-		if(substr($newS,0,4)=='<br>'){ // stripe too much <br>
-			$newS = substr($newS,4);
-		}
-		if(substr($newS,strlen($newS)-4)=='<br>'){
-			$newS = substr($newS,0,strlen($newS)-4);
-		}
 		return $newS;
 	}
 }
