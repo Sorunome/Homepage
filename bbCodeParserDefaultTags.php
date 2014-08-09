@@ -31,13 +31,13 @@ $bbParser->addTag('img',function($type,$s,$attrs,$bbParser){
 	return $bbParser->returnBB($type,$s,$attrs);
 },['width','height','alt'],'Display Image');
 $bbParser->addTag('center',function($type,$s,$attrs,$bbParser){
-	return '<div style="text-align:center;width:100%;" class="bbParserNoTrailingBr">'.$bbParser->parse($s).'</div>';
+	return '<div style="text-align:center;width:100%;">'.$bbParser->parse($s).'</div>'."\r\b\r";
 },[],'centers content');
 $bbParser->addTag('p',function($type,$s,$attrs,$bbParser){
 	return '<p>'.$bbParser->parse($s).'</p>';
 },[],'paragraph');
 $bbParser->addTag('table',function($type,$s,$attrs,$bbParser){
-	return '<table style="border:none;" class="bbParserNoTrailingBr">'.$bbParser->parse($s,false).'</table>';
+	return '<table style="border:none;">'.$bbParser->parse($s,false).'</table>';
 },[],'table');
 $bbParser->addTag('tr',function($type,$s,$attrs,$bbParser){
 	return '<tr>'.$bbParser->parse($s,false).'</tr>';
@@ -46,7 +46,7 @@ $bbParser->addTag('td',function($type,$s,$attrs,$bbParser){
 	return '<td>'.$bbParser->parse($s).'</td>';
 },[],'td');
 $bbParser->addTag('list',function($type,$s,$attrs,$bbParser){
-	return '<ul class="bbParserNoTrailingBr">'.$bbParser->parse($s,false).'</ul>';
+	return '<ul>'.$bbParser->parse($s,false).'</ul>';
 },[],'list');
 $bbParser->addTag('li',function($type,$s,$attrs,$bbParser){
 	return '<li>'.$bbParser->parse($s).'</li>';
@@ -64,10 +64,10 @@ $bbParser->addTag('slideshow',function($type,$s,$attrs,$bbParser){
 	return $bbParser->returnBB($type,$s,$attrs);
 },['slideshow'],'slideshow!');
 $bbParser->addTag('h1',function($type,$s,$attrs,$bbParser){
-	return '<h1 class="bbParserNoTrailingBr">'.$bbParser->parse($s).'</h1>';
+	return '<h1>'.$bbParser->parse($s).'</h1>'."\r\b\r";
 },[],'h1');
 $bbParser->addTag('h2',function($type,$s,$attrs,$bbParser){
-	return '<h2 class="bbParserNoTrailingBr">'.$bbParser->parse($s).'</h2>';
+	return '<h2>'.$bbParser->parse($s).'</h2>'."\r\b\r";
 },[],'h2');
 $bbParser->addTag('instructables',function($type,$s,$attrs,$bbParser){
 	if(!preg_match('/^[a-zA-Z0-9-+]+$/',$s))

@@ -205,6 +205,9 @@ class bbParser {
 			}
 		}
 		
+		$newS = str_replace("\r\b\r<br>",'',$newS); // remove unneeded <br>'s
+		$newS = str_replace("\r\b\r",'',$newS); // remove any extra control characters
+		
 		$newS = str_replace("\n",'',$newS); // HTML doesn't need these, so get rid of 'em
 		$newS = str_replace("\r",'',$newS);
 		$newS = str_replace("\t",'',$newS);

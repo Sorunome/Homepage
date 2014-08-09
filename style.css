@@ -103,8 +103,3 @@ hr {
 #permalink > a[pageid="0"]{
 	display:none;
 }
-
-/* bb parser */
-.bbParserNoTrailingBr + br {
-	display:none;
-}
