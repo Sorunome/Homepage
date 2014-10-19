@@ -53,14 +53,14 @@ $bbParser->addTag('li',function($type,$s,$attrs,$bbParser){
 },[],'li');
 $bbParser->addTag('youtube',function($type,$s,$attrs,$bbParser){
 	if(strpos($s,'&')===false && strpos($s,'"')===false && strpos($s,"'")===false && strpos($s,'<')===false)
-		return '<iframe width="560" height="315" src="http://www.youtube.com/embed/'.$s.'" frameborder="0" allowfullscreen></iframe>';
+		return '<iframe style="width:560px;height:315px;border-style:none;" src="https://www.youtube.com/embed/'.$s.'" allowfullscreen></iframe>';
 	return $bbParser->returnBB($type,$s,$attrs);
 },[],'youtube video');
 $bbParser->addTag('slideshow',function($type,$s,$attrs,$bbParser){
 	if(isset($attrs['slideshow']) && preg_match('/^[0-9]+$/',$attrs['slideshow']))
-		return '<iframe width="100%" height="600px" src="/webdeveloping/slideshow/?embed=newest&collection='.$attrs['slideshow'].'" frameborder="0" allowfullscreen mozallowfullscreen webkitallowfullscreen></iframe>';
+		return '<iframe style="width:100%;height:600px;border-style:none;" src="/webdeveloping/slideshow/?embed=newest&amp;collection='.$attrs['slideshow'].'" allowfullscreen></iframe>';
 	if(filter_var('http://www.sorunome.de/?='.$s,FILTER_VALIDATE_URL) && strpos($s,'&')===false)
-		return '<iframe width="100%" height="600px" src="/webdeveloping/slideshow/?embed=newest&pics='.$s.'" frameborder="0" allowfullscreen mozallowfullscreen webkitallowfullscreen></iframe>';
+		return '<iframe style="width:100%;height:600px;border-style:none;" src="/webdeveloping/slideshow/?embed=newest&amp;pics='.$s.'" allowfullscreen></iframe>';
 	return $bbParser->returnBB($type,$s,$attrs);
 },['slideshow'],'slideshow!');
 $bbParser->addTag('h1',function($type,$s,$attrs,$bbParser){
@@ -80,6 +80,9 @@ $bbParser->addTag('instruction',function($type,$s,$attrs,$bbParser){
 	}
 	return '<div id="instructionInstructionMain"></div><script type="text/javascript" src="http://www.sorunome.de/webdeveloping/instruction/?id='.$s.'&idPrev=instruction&js"></script>';
 },[],'makes an instruction');
+$bbParser->addTag('nobbc',function($type,$s,$attrs,$bbParser){
+	return htmlspecialchars($s);
+},[],'Escapes bb-code');
 $bbParser->addTag('html',function($type,$s,$attrs,$bbParser){
 	return $s;
 },[],'HTML');

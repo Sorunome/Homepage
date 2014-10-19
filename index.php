@@ -3,6 +3,7 @@ ini_set('display_errors',1);
 ini_set('display_startup_errors',1);
 error_reporting(-1);
 session_start();
+date_default_timezone_set('UTC');
 include_once('scrypt.php');
 include_once('vars.php');
 include_once('sql.php');
@@ -32,13 +33,13 @@ if(!isset($_SESSION['id'])){
 ob_start();
 include_once('config.php');
 $lang = 'en';
-date_default_timezone_set('UTC');
 /*
 Settings:
 1 - display normal page (header, footer etc)
 2 - not be in nav
 4 - enable comments
 8 - enable guest comments
+16 - redirect page (content is new page id)
 
 User
 Power
@@ -147,6 +148,7 @@ $security = new Security();
 
 include_once('bbCodeParser.php');
 include_once('bbCodeParserDefaultTags.php');
+include_once('bbCodeParserCustomTags.php');
 class Analytics{
 	/*
 	 * types:
@@ -284,7 +286,7 @@ class Page{
 	public function do404() {
 		header('HTTP/1.0 404 Not Found');
 		ob_end_clean();
-		return 'I just don\'t know what went wrong!';
+		return 'Error 404: page not found<br>I just don\'t know what went wrong!';
 	}
 	private function getQuickLinks($lang,$pathPartsParsed){
 		global $sql;
@@ -375,10 +377,10 @@ class Page{
 									'$("article").html(page.content);'.
 									'$("title").html(page.title);'.
 									'$("#quickLinks").html(page.quickLinks);'.
-									'$("#permalink > a").attr("pageid",page.id);'.
+									'$("#permalink > a").attr("data-pageid",page.id);'.
 									'$("#queryNum").text(page.queries);'.
 									'if(doHistory){'.
-										'history.pushState({},page.title,url);'.
+										'history.pushState({},page.title,(page.url!=undefined?page.url:url));'.
 									'}'.
 									'parseLinks();'.
 								'});'.
@@ -404,26 +406,26 @@ class Page{
 					'<div id="main">'.
 					'<table style="margin:0;padding:0;border:none;width:100%;font-size:11px">'.
 						'<tr>'.
-							'<td style="width:50%;text-align:left"><a href="/rssfeed.php" target="_blank" quick="false"><img src="/20/*/media/rss.png" alt="RSS Feed"></a></td>'.
+							'<td style="width:50%;text-align:left"><a href="/rssfeed.php" target="_blank" data-quick="false"><img src="/20/*/media/rss.png" alt="RSS Feed"></a></td>'.
 							'<td style="width:50%;text-align:right">'.
 								($security->isLoggedIn()?
 									'<b>'.$user_info['name'].'</b> ('.
 										($user_info['power']&8?'<a href="/analytics">Analytics</a> | ':'').
-										'<a quick="false" href="/account/logout">Log Out</a>)':
+										'<a data-quick="false" href="/account/logout">Log Out</a>)':
 									'(<a href="/account/login">Log In</a> | <a href="/account/register">Register</a>)').
 							'</td>'.
 						'</tr>'.
 					'</table>'.
 					'<a href="/"><img src="/media/header.jpg" alt="Home"></a>'.
 					($security->isLoggedIn()?
-						'<iframe src="/omnomirc/index.php" width="100%" height="280" frameborder="0" name="OmnomIRC"></iframe>':'').
+						'<iframe src="http://www.omnimaga.org/omnomirc/?network=5" width="100%" height="280" frameborder="0" name="OmnomIRC"></iframe>':'').
 					'<div style="height:1em;">'.
 						'<div style="float:left;" id="quickLinks">'.$this->getQuickLinks($lang,$pathPartsParsed).'</div>'.
-						'<div style="float:right;" id="permalink"><a pageid="'.(int)$id.'">Permalink</a><input type="text" style="display:none"></input></div>'.
+						'<div style="float:right;" id="permalink"><a data-pageid="'.(int)$id.'">Permalink</a><input type="text" style="display:none"></div>'.
 						'<script type="text/javascript">'.
 							'(function(){'.
 								'$("#permalink > a").mouseover(function(e){'.
-									'$("#permalink > input").val("http://'.$_SERVER['HTTP_HOST'].'?pageid="+$(this).attr("pageid").toString()).css("display","inline").focus().select();'.
+									'$("#permalink > input").val("http://'.$_SERVER['HTTP_HOST'].'/"+$(this).attr("data-pageid").toString()).css("display","inline").focus().select();'.
 									'$("#permalink > a").css("display","none");'.
 								'}).click(function(e){'.
 									'e.preventDefault();'.
@@ -453,7 +455,7 @@ class Page{
 						'function parseLinks(){'.
 							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a[href^="/"]\').off("click").click(function(e){'.
 								'if(e.button==0){'.
-									'if(!($(this).attr("quick")=="false" || this.href.indexOf(".zip")!=-1)){'.
+									'if(!($(this).attr("data-quick")=="false" || this.href.indexOf(".zip")!=-1)){'.
 										'e.preventDefault();'.
 										'getPageJSON(this.href);'.
 									'}'.
@@ -552,7 +554,8 @@ class Page{
 				'quickLinks' => $quicklinksHTML,
 				'queries' => $sql->getQueryNum(),
 				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn(),
-				'id' => $id
+				'id' => $id,
+				'url' => '/'.implode('/',$pathPartsParsed)
 			]);
 		}
 		return $pageHTML;
@@ -630,7 +633,16 @@ class Page{
 				return $returnHTML.'</table>';
 			},[],'Creates the news table');
 		}
-		if($p['ts']!=NULL){
+		if($p['id']!=NULL){
+			if($p['settings'] & 16){ // page link thingy
+				if(!isset($_GET['json'])){ // if user visits directly then redirect
+					header('Location: /?pageid='.(int)$p['content_'.$lang]);
+					die();
+				}
+				$pathPartsParsed = explode('/',$this->getPathFromId((int)$p['content_'.$lang]));
+				array_shift($pathPartsParsed); // get rid of first empty element
+				$p = $sql->query("SELECT $getParams FROM pages WHERE id=%d",[$lang,$lang,(int)$p['content_'.$lang]],0);
+			}
 			$html = $bbParser->parse($p['content_'.$lang],['*']);
 			if($security->isLoggedIn() && $user_info['power']&4){
 				$html .= '<script type="text/javascript">'.
@@ -639,7 +651,7 @@ class Page{
 										'.css({"font-size":"12px","text-align":"right"})'.
 										'.append('.
 											'$("<a>")'.
-												'.attr("quick","false")'.
+												'.attr("data-quick","false")'.
 												'.text("Edit")'.
 												'.click(function(e){'.
 													'e.preventDefault();'.
@@ -664,7 +676,7 @@ class Page{
 																			'.css({"font-size":"12px","text-align":"center","margin-bottom":"10px"})'.
 																			'.append('.
 																				'$("<a>")'.
-																					'.attr("quick","false")'.
+																					'.attr("data-quick","false")'.
 																					'.text("Save")'.
 																					'.click(function(e){'.
 																						'e.preventDefault();'.
@@ -678,7 +690,7 @@ class Page{
 																					'}),'.
 																				'" | ",'.
 																				'$("<a>")'.
-																					'.attr("quick","false")'.
+																					'.attr("data-quick","false")'.
 																					'.text("Cancle")'.
 																					'.click(function(e){'.
 																						'e.preventDefault();'.
@@ -787,10 +799,16 @@ foreach($pathParts as $part) {
 		$pathPartsParsed[] = str_replace(' ','+',$part);
 	}
 }
+
 if(isset($_GET['pageid'])){ // direct page ID, http forward
 	header('Location: '.$page->getPathFromId((int)$_GET['pageid']));
 	exit; // good bye
 }
+if(sizeof($pathPartsParsed) == 1 && preg_match('/^[0-9]+$/',$pathPartsParsed[0])){
+	header('Location: '.$page->getPathFromId((int)$pathPartsParsed[0]));
+	exit; // good bye
+}
+
 $analytics = new Analytics();
 switch($pathPartsParsed[0]){
 	case 'analytics':
@@ -853,7 +871,7 @@ switch($pathPartsParsed[0]){
 		$p = $sql->query("SELECT settings FROM pages WHERE id='%s'",[(int)$_POST['pageId']],0);
 		if(!$p['settings'] & 4)
 			die('ERROR: You can\'t post comments on this page');
-		$sql->query("INSERT INTO comments (pageId,refId,userId,poster,content,allowedTags) VALUES ('%s','%s','%s','%s','%s','b,i,url')",
+		$sql->query("INSERT INTO comments (pageId,refId,userId,poster,content,allowedTags) VALUES ('%s','%s','%s','%s','%s','b,i,url,nobbc')",
 			[(int)$_POST['pageId'],(int)$_POST['refId'],$uid,$name,$_POST['comment']]);
 		$id = $sql->query("SELECT MAX(id) FROM comments",[],0);
 		$comment = $sql->query("SELECT id,ts,userId,poster,content,allowedTags FROM comments WHERE id='%s'",[$id['MAX(id)']],0);

@@ -156,7 +156,7 @@ class bbParser {
 		while(true){ // only fetch the first level tags
 			$reducedTags = [];
 			for($i=0;$i<sizeof($tags);$i++){ // loop through all tags to only fetch the outer ones
-				if((sizeof($tags)<=1 || ($i!=0 && $tags[$i]['endTagPos']>$tags[$i-1]['endTagPos']) || $i==0 )){
+				if((sizeof($tags)<=1 || ($i!=0 && $tags[$i]['start']>$tags[$i-1]['endTagPos'] && $tags[$i-1]['endTagPos']!=strlen($s)) || $i==0 )){
 					$reducedTags[] = $tags[$i];
 				}
 			}
