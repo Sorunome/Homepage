@@ -149,6 +149,7 @@ $security = new Security();
 include_once('bbCodeParser.php');
 include_once('bbCodeParserDefaultTags.php');
 include_once('bbCodeParserCustomTags.php');
+$otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf','wav'];
 class Analytics{
 	/*
 	 * types:
@@ -235,16 +236,15 @@ class Analytics{
 				'<br>'.$this->getAllTables($m,$y);
 	}
 	public function __construct(){
-		global $user_info,$fileExtention,$security;
+		global $user_info,$fileExtention,$security,$otherPages;
 		$this->query = '';
 		$this->params = [];
-		$this->otherPages = ['jpg','png','gif','zip','jpeg','js','css','ico','mp3','ogg','ttf','wav'];
 		$this->addNum(0);
 		$isNoBot = (isset($_SERVER['HTTP_USER_AGENT']) && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'bot')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'spider')===false && strpos(strtolower($_SERVER['HTTP_USER_AGENT']),'crawl')===false);
 		if($isNoBot){
 			$this->addNum(7);
 		}
-		if(!in_array(strtolower($fileExtention),$this->otherPages)){
+		if(!in_array(strtolower($fileExtention),$otherPages)){
 			$this->addNum(1);
 			$this->addNum(2,$_GET['path']);
 			$isVisit = ((!isset($_SESSION['counted_visit']) || !$_SESSION['counted_visit']) && isset($_SESSION['haveCookies']) && $_SESSION['haveCookies']);
@@ -331,49 +331,15 @@ class Page{
 					'<link rel="icon" type="image/png" href="/media/favicon.png">'.
 					'<meta http-equiv="content-type" content="text/html; charset=UTF-8">'.
 					'<script type="text/javascript" src="/jquery-2.0.3.min.js"></script>'.
-					'<script type="text/javascript" src="/jsencrypt.min.js"></script>'.
+					'<script type="text/javascript" src="/homepage.js.php"></script>'.
 					'<script type="text/javascript">'.
-						'LOGGEDIN='.($security->isLoggedIn()?'true':'false').';'.
-						'function reLogIn(){'.
-							'$.getJSON("/getKeys").done(function(keys){'.
-								'var encrypt = new JSEncrypt();'.
-								'encrypt.setPublicKey(atob(keys.hash.key));'.
-								'var pwdenc = encrypt.encrypt(localStorage.getItem("longtimePwd"));'.
-								'$.post("/account/verifyLogin?ltpwdv",{'.
-									'pwd:pwdenc,'.
-									'id:keys.hash.id,'.
-									'fkey:keys.form.key,'.
-									'fid:keys.form.id,'.
-									'uid:localStorage.getItem("id")'.
-								'}).done(function(data){'.
-									'if(data.success){'.
-										'console.log(data);'.
-										'document.cookie="session-id="+escape(data.sessid)+"; path=/";'.
-										'if(LOGGEDIN){'.
-											'getPageJSON(document.URL,false);'.
-										'}else{'.
-											'window.location.reload();'.
-										'}'.
-									'}else{'.
-										'document.cookie="shouldlogin=; path=/; expires=Thu, 01 Jan 1970 00:00:01 GMT";'.
-										'localStorage.removeItem("longtimePwd");'.
-										'localStorage.removeItem("id");'.
-										'if(LOGGEDIN){'.
-											'window.location.reload();'.
-										'}'.
-									'}'.
-								'})'.
-							'});'.
-						'}'.
 						'function getPageJSON(url,doHistory){'.
 							'if(doHistory===undefined){'.
 								'doHistory = true;'.
 							'}'.
+							'doHistory = true;'.
 							'if(history.pushState){'.
-								'$.getJSON(url+((url.indexOf("?")!=-1)?"&json":"?json")).done(function(page){'.
-									'if(page.relogin){'.
-										'reLogIn();'.
-									'}'.
+								'homepage.get(url+((url.indexOf("?")!=-1)?"&json":"?json"),function(page){'.
 									'$("article").html(page.content);'.
 									'$("title").html(page.title);'.
 									'$("#quickLinks").html(page.quickLinks);'.
@@ -432,7 +398,7 @@ class Page{
 								'});'.
 								'$("#permalink > input").mouseout(function(e){'.
 									'$("#permalink > input").css("display","none");'.
-									'$("#permalink > a").css("display","inline");'.
+									'$("#permalink > a").css("display","");'.
 								'}).click(function(e){'.
 									'$(this).focus().select();'.
 								'});'.
@@ -463,7 +429,6 @@ class Page{
 							'});'.
 						'}'.
 						'parseLinks();'.
-						(isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn()?'reLogIn();':'').
 					'</script>'.
 				'</body>'.
 			'</html>';
@@ -476,33 +441,40 @@ class Page{
 			$pages[] = [
 				'name' => 'Home',
 				'href' => '/',
-				'inner' => []
+				'inner' => [],
+				'settings' => 1,
+				'id' => 1
 			];
 		}
 		$rows = $sql->query("SELECT id,name,title_%s,settings FROM pages WHERE refId='%s' ORDER BY sorder ASC",[$lang,(string)$i]);
-		$i = 0;
-		while(isset($rows[$i]) && ($row = $rows[$i++])){
-			if($row['id']!=NULL && ($i!=1 || (int)$row['id']!=1) && ($row['settings'] & 2)==0){
+		foreach($rows as $row){
+			if($row['id']!=NULL && ($i!=1 || (int)$row['id']!=1)){
 				$pages[] = [
 					'name' => $row['title_'.$lang],
 					'href' => $path.'/'.$row['name'],
-					'inner' => $this->createNavInner((int)$row['id'],$path.'/'.$row['name'])
+					'inner' => $this->createNavInner((int)$row['id'],$path.'/'.$row['name']),
+					'settings' => $row['settings'],
+					'id' => (int)$row['id']
 				];
 			}
 		}
 		return $pages;
 	}
-	private function createNav(){
+	public function createNav(){
 		return [
 			'name' => 'root',
 			'href' => '/',
-			'inner' => $this->createNavInner()
+			'inner' => $this->createNavInner(),
+			'settings' => 1,
+			'id' => NULL
 		];
 	}
 	private function createNavHTML($obj){
 		$s = '';
 		foreach($obj as $o){
-			$s .= '<li><a href="'.$o['href'].'">'.$o['name'].'</a>'.$this->createNavHTML($o['inner']).'</li>';
+			if(($o['settings'] & 2)==0){
+				$s .= '<li><a href="'.$o['href'].'">'.$o['name'].'</a>'.$this->createNavHTML($o['inner']).'</li>';
+			}
 		}
 		if($s!==''){
 			$s = '<ul>'.$s.'</ul>';
@@ -519,7 +491,9 @@ class Page{
 			$navJSON['inner'][] = [
 				'name' => 'Edit',
 				'href' => '/edit/structure',
-				'inner' => []
+				'inner' => [],
+				'settings' => 1,
+				'id' => NULL
 			];
 		}
 		return '<nav>'.$this->createNavHTML($navJSON['inner']).'</nav>';
@@ -591,9 +565,14 @@ class Page{
 		global $sql;
 		$pathParts = [];
 		do{
-			$res = $sql->query("SELECT refId,name FROM pages WHERE id=%d",[(int)$id],0);
-			$id = $res['refId'];
-			$pathParts[] = $res['name'];
+			$res = $sql->query("SELECT refId,name,id FROM pages WHERE id=%d",[(int)$id],0);
+			if($res['id']!==NULL){
+				$id = $res['refId'];
+				$pathParts[] = $res['name'];
+			}else{
+				$pathParts = ['err404'];
+				break;
+			}
 		}while($id!=1);
 		return '/'.implode('/',array_reverse($pathParts));
 	}
@@ -655,8 +634,8 @@ class Page{
 												'.text("Edit")'.
 												'.click(function(e){'.
 													'e.preventDefault();'.
-													'$.getJSON("/edit/getBB&p='.$p['id'].'")'.
-														'.done(function(data){'.
+													'homepage.get("/edit/getBB&p='.$p['id'].'",'.
+														'function(data){'.
 															'if(data.success){'.
 																'$("article")'.
 																	'.empty()'.
@@ -680,8 +659,8 @@ class Page{
 																					'.text("Save")'.
 																					'.click(function(e){'.
 																						'e.preventDefault();'.
-																						'$.post("/edit/savePage?p='.$p['id'].'",{"c":$("article textarea").val()})'.
-																							'.done(function(data){'.
+																						'homepage.post("/edit/savePage?p='.$p['id'].'",{"c":$("article textarea").val()},'.
+																							'function(data){'.
 																								'data = eval(data);'.
 																								'if(data.success){'.
 																									'getPageJSON(document.URL,false);'.
@@ -746,8 +725,8 @@ class Page{
 													'.submit(function(e){'.
 														'e.preventDefault();'.
 														'var form = this;'.
-														'$.getJSON("/getKeys").done(function(keys){'.
-															'$.post("/comment",{'.
+														'homepage.get("/getKeys",function(keys){'.
+															'homepage.post("/comment",{'.
 																(!$security->isLoggedIn() && $p['settings'] & 8?
 																	'name:$(form).find(\'[name="name"]\').val(),':'').
 																'comment:$(form).find("textarea").val(),'.
@@ -755,7 +734,7 @@ class Page{
 																'refId:$(form).find(\'[name="refId"]\').val(),'.
 																'fkey:keys.form.key,'.
 																'fid:keys.form.id'.
-															'}).done(function(data){'.
+															'},function(data){'.
 																'$(form).parent().html(data);'.
 																'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
 															'});'.
@@ -776,16 +755,208 @@ class Page{
 	}
 }
 $page = new Page();
+class Edit{
+	private function createStructureHTML($obj){
+		global $lang;
+		
+		$s = '';
+		$t = '';
+		$btns = ' <a class="structureUp">^</a> <a class="structureDown">v</a>';
+		foreach($obj as $o){
+			if(($o['settings'] & 16)==1){
+				$s .= '<li>'.$o['name'].'</li>';
+			}else{
+				if($o['settings']&2){
+					if($o['id']!==NULL){
+						$t .= '<li><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$this->createStructureHTML($o['inner']).'</li>';
+					}else{
+						$t .= '<li>'.$o['name'].'</a>'.$this->createStructureHTML($o['inner']).'</li>';
+					}
+				}else{
+					if($o['id']!==NULL){
+						$s .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner']).'</li>';
+					}else{
+						$s .= '<li>'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner']).'</li>';
+					}
+				}
+			}
+		}
+		if($s!==''){
+			$s = '<ul>'.$s.'</ul>';
+		}
+		if($t!==''){
+			$s .= '<hr><ul>'.$t.'</ul>';
+		}
+		return $s;
+	}
+	public function saveOrder($data){
+		global $security,$user_info,$page,$vars,$lang,$pathPartsParsed,$sql;
+		header('Content-Type: text/json');
+		if($security->isLoggedIn() && $user_info['power']&16){
+			$json = json_decode($data,true);
+			if($json!==NULL){
+				foreach($json as $j){
+					if(isset($j['id']) && isset($j['sorder'])){
+						$sql->query("UPDATE `pages` SET `sorder`=%d WHERE `id`=%d",[(int)$j['sorder'],(int)$j['id']]);
+					}
+				}
+				$vars->set('cache_nav_'.$lang,$page->createNav());
+				echo '{"success":true}';
+			}else{
+				echo '{"success":false,"msg":"invalid data"}';
+			}
+		}else{
+			echo '{"success":false,"msg":"permission denied"}';
+		}
+	}
+	public function deleteStructure($id){
+		global $security,$user_info,$sql,$vars,$page,$lang;
+		header('Content-Type: text/json');
+		if($security->isLoggedIn() && $user_info['power']&16){
+			$p = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d",[(int)$id],0);
+			if($p['id']!==NULL){
+				$sql->query("DELETE FROM `pages` WHERE `id`=%d",[(int)$id]);
+				$vars->set('cache_nav_'.$lang,$page->createNav());
+				echo '{"success":true}';
+			}else{
+				echo '{"success":false,"msg":"page not found"}';
+			}
+		}else{
+			echo '{"success":false,"msg":"permission denied"}';
+		}
+	}
+	public function saveStructure($id,$data){
+		global $security,$user_info,$sql,$vars,$page,$lang;
+		header('Content-Type: text/json');
+		if($security->isLoggedIn() && $user_info['power']&16){
+			if(isset($data['name']) && isset($data['title_en']) && isset($data['settings'])){
+				$p = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d",[(int)$id],0);
+				if($p['id']!==NULL){
+					$sql->query("UPDATE `pages` SET `name`='%s',`title_en`='%s',`settings`=%d WHERE `id`=%d",[$data['name'],$data['title_en'],(int)$data['settings'],(int)$id]);
+					$vars->set('cache_nav_'.$lang,$page->createNav());
+					echo '{"success":true}';
+				}else{
+					echo '{"success":false,"msg":"page not found"}';
+				}
+			}else{
+				echo '{"success":false,"msg":"missing required fields"}';
+			}
+		}else{
+			echo '{"success":false,"msg":"permission denied"}';
+		}
+	}
+	public function dispStructure(){
+		global $security,$user_info,$page,$vars,$lang,$pathPartsParsed,$sql;
+		if($security->isLoggedIn() && $user_info['power']&16){
+			if(isset($_GET['pid'])){
+				$p = $sql->query("SELECT `name`,`title_en`,`id`,`settings` FROM `pages` WHERE `id`=%d",[(int)$_GET['pid']],0);
+				if($p['id']!==NULL){
+					$pageHTML = '<h1>'.htmlspecialchars($p['name']).'</h1>'.
+						'<form id="structureEditForm">'.
+							'Name (url):<input type="text" name="name" value="'.htmlspecialchars($p['name']).'"><br>'.
+							'Title (en):<input type="text" name="title_en" value="'.htmlspecialchars($p['title_en']).'"><br>'.
+							'Settings:<br>'.
+							'&nbsp;Display with header etc:<input type="checkbox" name="settings_1" '.($p['settings']&1?'checked="checked"':'').'><br>'.
+							'&nbsp;Not be in nav:<input type="checkbox" name="settings_2" '.($p['settings']&2?'checked="checked"':'').'><br>'.
+							'&nbsp;Enable comments:<input type="checkbox" name="settings_4" '.($p['settings']&4?'checked="checked"':'').'><br>'.
+							'&nbsp;Enable guest comments:<input type="checkbox" name="settings_8" '.($p['settings']&8?'checked="checked"':'').'><br>'.
+							'&nbsp;Redirect page:<input type="checkbox" name="settings_16" '.($p['settings']&16?'checked="checked"':'').'><br>'.
+							'<input type="submit" value="save">'.
+						'</form>'.
+						'<button id="deleteStructure" style="float:right;">Delete</button>'.
+						'<script type="text/javascript">'.
+							'(function(){'.
+								'$("#structureEditForm").submit(function(e){'.
+									'e.preventDefault();'.
+									'var sendSettings = {};'.
+									'sendSettings.name = this.name.value;'.
+									'sendSettings.title_en = this.title_en.value;'.
+									'sendSettings.settings = (this.settings_1.checked?1:0)'.
+												'+(this.settings_2.checked?2:0)'.
+												'+(this.settings_4.checked?4:0)'.
+												'+(this.settings_8.checked?8:0)'.
+												'+(this.settings_16.checked?16:0);'.
+									'homepage.post("/edit/savestructure?id='.$p['id'].'",sendSettings,function(data){'.
+										'if(data.success){'.
+											'alert("Saved!");'.
+										'}else{'.
+											'alert("Error Saving: "+(data.msg!==undefined?data.msg:""));'.
+										'}'.
+									'});'.
+								'});'.
+								'$("#deleteStructure").click(function(e){'.
+									'e.preventDefault();'.
+									'if(confirm("Are you sure you want to delete this page?")){'.
+										'homepage.get("/edit/deletestructure?id='.$p['id'].'",function(data){'.
+											'if(data.success){'.
+												'alert("Page deleted!");'.
+												'getPageJSON("/edit/structure");'.
+											'}else{'.
+												'alert("Error Deleting: "+(data.msg!==undefined?data.msg:""));'.
+											'}'.
+										'});'.
+									'}'.
+								'});'.
+							'})();'.
+						'</script>';
+				}else{
+					$pageHTML = '<b>ERROR</b>: page not found';
+				}
+				$pageHTML .= '<br><br><a href="/edit/structure">&lt;&lt; Back</a>';
+				echo $page->getPage('Edit Page Structure',$pageHTML,$lang,$pathPartsParsed);
+			}else{
+				$navJSON = $vars->get('cache_nav_'.$lang);
+				$pageHTML = '<div>'.$this->createStructureHTML($navJSON['inner']).'</div>'.
+					'<script type="text/javascript">'.
+						'(function(){'.
+							'var saveStructure = function($elem){'.
+									'var id;'.
+									'if($elem[0].tagName == "article"){'.
+										'id = 0;'.
+									'}else{'.
+										'id = parseInt($elem.attr("data-id"));'.
+									'}'.
+									'var i = 0,'.
+										'ids = $.map($elem.find("ul:first").children(),function(v){'.
+											'return {id:parseInt($(v).attr("data-id"),10),sorder:++i};'.
+										'});'.
+									'homepage.post("/edit/saveorder",{data:JSON.stringify(ids)},function(data){'.
+										'if(!data.success){'.
+											'alert("Error Saving: "+(data.msg!==undefined?data.msg:""));'.
+										'}'.
+									'});'.
+								'};'.
+							'$(".structureUp").click(function(e){'.
+								'e.preventDefault();'.
+								'$elem = $(this).parent();'.
+								'if($elem.prev().length != 0){'.
+									'$elem.prev().before($elem);'.
+									'saveStructure($elem.parent().parent());'.
+								'}'.
+							'});'.
+							'$(".structureDown").click(function(e){'.
+								'e.preventDefault();'.
+								'$elem = $(this).parent();'.
+								'if($elem.next().length != 0){'.
+									'$elem.next().after($elem);'.
+									'saveStructure($elem.parent().parent());'.
+								'}'.
+							'});'.
+						'})();'.
+					'</script>';
+				echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
+			}
+		}else{
+			echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
+		}
+	}
+}
+$edit = new Edit();
 
 if(strpos($_SERVER['REQUEST_URI'],'/?') && strpos($_SERVER['REQUEST_URI'],'/?')<strpos($_SERVER['REQUEST_URI'],'?')){
 	$_GET['path'] .= 'index.php';
 }
-if($security->isLoggedIn()){ // grab user info
-	$user_info = $sql->query("SELECT session,name,settings,power,id FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
-}
-if(isset($_COOKIE['shouldlogin'])){ // extend log in cookie
-	setcookie('shouldlogin', $_COOKIE['shouldlogin'], time()+3600*24*30,'/');
-}
+
 $fullPath=str_replace(' ','+',$_GET['path']);
 $pathParts = explode('/',$fullPath);
 $pathPartsParsed = array();
@@ -799,6 +970,38 @@ foreach($pathParts as $part) {
 		$pathPartsParsed[] = str_replace(' ','+',$part);
 	}
 }
+
+if($security->isLoggedIn()){ // grab user info
+	$user_info = $sql->query("SELECT session,name,settings,power,id FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
+}elseif(!isset($_GET['norelog']) && isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn()){
+	if(isset($_GET['hps'])){
+		header('Content-Type: text/json');
+		echo json_encode([
+			'relogin' => true
+		]);
+		exit;
+	}elseif(!in_array(strtolower($fileExtention),$otherPages)){
+		echo '<!DOCTYPE html>'.
+			'<html>'.
+				'<head>'.
+					'<meta http-equiv="content-type" content="text/html; charset=UTF-8">'.
+					'<script type="text/javascript" src="/jquery-2.0.3.min.js?norelog"></script>'.
+					'<script type="text/javascript" src="/homepage.js.php?norelog"></script>'.
+					'<script type="text/javascript">homepage.relog();</script>'.
+				'</head>'.
+				'<body>'.
+					'Logging in...'.
+				'</body>'.
+			'</html>';
+		exit;
+	}
+}
+
+
+if(isset($_COOKIE['shouldlogin'])){ // extend log in cookie
+	setcookie('shouldlogin', $_COOKIE['shouldlogin'], time()+3600*24*30,'/');
+}
+
 
 if(isset($_GET['pageid'])){ // direct page ID, http forward
 	header('Location: '.$page->getPathFromId((int)$_GET['pageid']));
@@ -1013,9 +1216,9 @@ switch($pathPartsParsed[0]){
 			switch($pathPartsParsed[1]){
 				case 'getBB':
 					header('Content-type: text/json');
-					$p = $sql->query("SELECT content_$lang FROM pages WHERE id='%s'",[$_GET['p']],0);
+					$p = $sql->query("SELECT content_$lang,id FROM pages WHERE id='%s'",[$_GET['p']],0);
 					if($security->isLoggedIn() && $user_info['power']&4){
-						if($p['content_'.$lang]){
+						if($p['id'] !== NULL){
 							echo json_encode([
 								'success' => true,
 								'code' => $p['content_'.$lang]
@@ -1037,16 +1240,22 @@ switch($pathPartsParsed[0]){
 					}
 					break;
 				case 'structure':
-					if($security->isLoggedIn() && $user_info['power']&16){
-						if(isset($_GET['new'])){
-							
-						}else{
-							$pageHTML = 'too lazy to program right now';
-							echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
-						}
+					$edit->dispStructure();
+					break;
+				case 'savestructure':
+					$edit->saveStructure($_GET['id'],$_POST);
+					break;
+				case 'deletestructure':
+					$edit->deleteStructure($_GET['id']);
+					break;
+				case 'saveorder':
+					if(isset($_POST['data'])){
+						$edit->saveOrder($_POST['data']);
 					}else{
-						echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
+						header('Content-Type: text/json');
+						echo '{"success":false,"msg":"missing required fields"}';
 					}
+					break;
 			}
 		}else{
 			echo $page->getPage('Nope','<script type="text/javascript">getPageJSON("/");</script>Redirecting...',$lang,$pathPartsParsed);

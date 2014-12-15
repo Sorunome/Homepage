@@ -38,6 +38,7 @@ class Sql{
 		}else{
 			$result = $mysqli->query(vsprintf($query,$args));
 			if($mysqli->errno==1065){ //empty
+				$result->free();
 				return array();
 			}
 			if($mysqli->errno!=0){
@@ -64,6 +65,7 @@ class Sql{
 				if($num===false)
 					$res = array($res);
 			}
+			$result->free();
 			return $res;
 		}
 	}

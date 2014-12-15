@@ -100,6 +100,6 @@ hr {
 	font-size:11px;
 }
 
-#permalink > a[pageid="0"]{
+#permalink > a[data-pageid="0"]{
 	display:none;
 }
