@@ -1,4 +1,13 @@
 <?php
+function validate_url($url){
+	$url = trim($url);
+	$r = ((strpos($url, "http://") === 0 || strpos($url, "https://") === 0) &&
+			filter_var($url, FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED | FILTER_FLAG_HOST_REQUIRED) !== false);
+	if(!$r){
+		return preg_match('@^[0-9a-zA-Z+ /#*._]+$@',$url) === 1;
+	}
+	return $r;
+}
 $bbParser = new bbParser();
 $bbParser->addTag('b',function($type,$s,$attrs,$bbParser){
 	return '<b>'.$bbParser->parse($s).'</b>';
@@ -6,18 +15,21 @@ $bbParser->addTag('b',function($type,$s,$attrs,$bbParser){
 $bbParser->addTag('i',function($type,$s,$attrs,$bbParser){
 	return '<i>'.$bbParser->parse($s).'</i>';
 },[],'italic');
+$bbParser->addTag('u',function($type,$s,$attrs,$bbParser){
+	return '<u>'.$bbParser->parse($s).'</u>';
+},[],'underline');
 $bbParser->addTag('url',function($type,$s,$attrs,$bbParser){
 	if (isset($attrs['url'])) {
-		if (filter_var($attrs['url'],FILTER_VALIDATE_URL) || filter_var('http://www.sorunome.de/'.$attrs['url'],FILTER_VALIDATE_URL))
+		if (validate_url($attrs['url']))
 			return '<a href="'.$attrs['url'].'">'.$bbParser->parse($s).'</a>';
 		return $bbParser->returnBB($type,$s,$attrs);
 	}
-	if (filter_var($s,FILTER_VALIDATE_URL) || filter_var('http://www.sorunome.de/'.$s,FILTER_VALIDATE_URL))
-		return '<a href="'.$s.'">'.$s.'</a>';
+	if (validate_url($s))
+		return '<a href="'.$s.'">'.htmlspecialchars($s).'</a>';
 	return $bbParser->returnBB($type,$s,$attrs);
 },['url'],'Display URL');
 $bbParser->addTag('img',function($type,$s,$attrs,$bbParser){
-	if (filter_var($s,FILTER_VALIDATE_URL) || filter_var('http://www.sorunome.de/'.$s,FILTER_VALIDATE_URL)) {
+	if (validate_url($s)){
 		$alt = $s;
 		if (isset($attrs['alt']))
 			$alt = htmlspecialchars($attrs['alt']);
@@ -45,6 +57,9 @@ $bbParser->addTag('tr',function($type,$s,$attrs,$bbParser){
 $bbParser->addTag('td',function($type,$s,$attrs,$bbParser){
 	return '<td>'.$bbParser->parse($s).'</td>';
 },[],'td');
+$bbParser->addTag('th',function($type,$s,$attrs,$bbParser){
+	return '<th>'.$bbParser->parse($s).'</th>';
+},[],'th');
 $bbParser->addTag('list',function($type,$s,$attrs,$bbParser){
 	return '<ul>'.$bbParser->parse($s,false).'</ul>';
 },[],'list');
@@ -59,7 +74,7 @@ $bbParser->addTag('youtube',function($type,$s,$attrs,$bbParser){
 $bbParser->addTag('slideshow',function($type,$s,$attrs,$bbParser){
 	if(isset($attrs['slideshow']) && preg_match('/^[0-9]+$/',$attrs['slideshow']))
 		return '<iframe style="width:100%;height:600px;border-style:none;" src="/webdeveloping/slideshow/?embed=newest&amp;collection='.$attrs['slideshow'].'" allowfullscreen></iframe>';
-	if(filter_var('http://www.sorunome.de/?='.$s,FILTER_VALIDATE_URL) && strpos($s,'&')===false)
+	if(validate_url('http://www.sorunome.de/?='.$s) && strpos($s,'&')===false)
 		return '<iframe style="width:100%;height:600px;border-style:none;" src="/webdeveloping/slideshow/?embed=newest&amp;pics='.$s.'" allowfullscreen></iframe>';
 	return $bbParser->returnBB($type,$s,$attrs);
 },['slideshow'],'slideshow!');

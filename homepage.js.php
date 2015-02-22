@@ -5,7 +5,7 @@ echo 'LOGGEDIN='.($security->isLoggedIn()?'true':'false').';';
 homepage = (function(){
 	var self = {
 			network:{
-				relog:function(fn){
+				relog:function(fn,forceReload){
 					$.getJSON("/getKeys?norelog").done(function(keys){
 						$.getScript('/jsencrypt.min.js?norelog',function(){
 							var encrypt = new JSEncrypt();
@@ -35,11 +35,14 @@ homepage = (function(){
 										window.location.reload();
 									}
 								}
+								if(forceReload===true){
+									window.location.reload();
+								}
 							});
 						});
 					});
 				},
-				checkReLog:function(data,url,pdata,fn){
+				checkReLog:function(data,url,pdata,fn,status){
 					if(data.relogin!==undefined && data.relogin){
 						self.network.relog(function(){
 							if(pdata===false){
@@ -50,18 +53,22 @@ homepage = (function(){
 						});
 					}else{
 						if(typeof fn == 'function'){
-							fn(data);
+							fn(data,status);
 						}
 					}
 				},
 				get:function(url,fn){
 					$.get(url).done(function(data){
-						self.network.checkReLog(data,url,false,fn);
+						self.network.checkReLog(data,url,false,fn,200);
+					}).error(function(data){
+						self.network.checkReLog(data.responseJSON || data.responseText,url,false,fn,data.status);
 					});
 				},
 				post:function(url,pdata,fn){
 					$.post(url,pdata).done(function(data){
-						self.network.checkReLog(data,url,pdata,fn);
+						self.network.checkReLog(data,url,pdata,fn,200);
+					}).error(function(data){
+						self.network.checkReLog(data.responseJSON || data.responseText,url,pdata,fn,data.status);
 					});
 				}
 			}
@@ -70,13 +77,13 @@ homepage = (function(){
 			get:function(url,fn){
 				self.network.get(url+((url.indexOf('?')!=-1)?'&hps':'?hps'),fn);
 			},
-			post:function(url,fn,data){
-				self.network.post(url+((url.indexOf('?')!=-1)?'&hps':'?hps'),fn,data);
+			post:function(url,data,fn){
+				self.network.post(url+((url.indexOf('?')!=-1)?'&hps':'?hps'),data,fn);
 			},
 			relog:function(){
 				self.network.relog(function(){
 					window.location.reload();
-				});
+				},true);
 			}
 		};
 })();

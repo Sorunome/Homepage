@@ -69,7 +69,7 @@ nav a,nav a:link,nav a:visited,nav a:hover,nav a:active {
 	text-align:left;
 }
 article {
-	margin-left:200px;
+	margin-left:210px;
 }
 footer {
 	border-top:1px solid #146907;
@@ -103,3 +103,4 @@ hr {
 #permalink > a[data-pageid="0"]{
 	display:none;
 }
+

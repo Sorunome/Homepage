@@ -2,16 +2,21 @@
 class Sql{
 	private $mysqliConnection;
 	private $queryNum;
+	private $curDb;
 	public function __construct(){
 		$this->queryNum = 0;
 		$this->mysqliConnection = false;
+		$this->curDb = NULL;
 	}
 	private function connectSql(){
 		global $vars;
 		if($this->mysqliConnection !== false){
 			return $this->mysqliConnection;
 		}
-		$mysqli = new mysqli($vars->get('sql_host'),$vars->get('sql_user'),$vars->get('sql_password'),$vars->get('sql_database'));
+		if($this->curDb==NULL){
+			$this->curDb = $vars->get('sql_database');
+		}
+		$mysqli = new mysqli($vars->get('sql_host'),$vars->get('sql_user'),$vars->get('sql_password'),$this->curDb);
 		if ($mysqli->connect_errno){
 			die('Could not connect to SQL DB: '.$mysqli->connect_errno.' '.$mysqli->connect_error);
 		}
@@ -19,7 +24,7 @@ class Sql{
 		$this->mysqliConnection = $mysqli;
 		return $mysqli;
 	}
-	public function query($query,$args = [],$num = false){
+	public function query($query,$args = [],$num = false,$queryMode = MYSQLI_STORE_RESULT){
 		$mysqli = $this->connectSql();
 		for($i=0;$i<count($args);$i++)
 			$args[$i] = $mysqli->real_escape_string($args[$i]);
@@ -36,7 +41,7 @@ class Sql{
 			}while($mysqli->next_result());
 			return NULL;
 		}else{
-			$result = $mysqli->query(vsprintf($query,$args));
+			$result = $mysqli->query(vsprintf($query,$args),$queryMode);
 			if($mysqli->errno==1065){ //empty
 				$result->free();
 				return array();
@@ -71,6 +76,10 @@ class Sql{
 	}
 	public function getQueryNum(){
 		return $this->queryNum;
+	}
+	public function switchDb($db){
+		$this->curDb = $db;
+		return $this->connectSql()->select_db($db);
 	}
 }
 $sql = new Sql();

@@ -4,6 +4,7 @@ ini_set('display_startup_errors',1);
 error_reporting(-1);
 session_start();
 date_default_timezone_set('UTC');
+$startTime = microtime(true);
 include_once('scrypt.php');
 include_once('vars.php');
 include_once('sql.php');
@@ -48,12 +49,14 @@ Power
 4 - edit pages
 8 - view analytics
 16 - edit page structure
+32 - view reuben3
 */
 
 class Security{
 	private $checkedSessKey;
 	public function __construct(){
 		$this->checkedSessKey = false;
+		$this->newestPwdType = 1;
 	}
 	private function clearOldKeys(){
 		global $sql;
@@ -78,6 +81,15 @@ class Security{
 		$sql->query("INSERT INTO rsa_keys (privKey,pubKey) VALUES ('%s','%s')",[$privKey,$pubKey]);
 		$id = $sql->query("SELECT MAX(id) FROM rsa_keys",[],0);
 		return [$pubKey,$id['MAX(id)']];
+	}
+	public function hash($pwd,$salt,$type = -1){
+		switch($type){
+			case 0:
+				return Password::hash($pwd,$salt);
+			case 1:
+			default:
+				return hash_hmac('sha512',$pwd,$salt);
+		}
 	}
 	public function generateRandomString($length = 10) {
 		$characters = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
@@ -110,15 +122,21 @@ class Security{
 		$hk = $this->createKeys();
 		return '{"form":{"id":"'.$fk[1].'","key":"'.$fk[0].'"},"hash":{"id":"'.$hk[1].'","key":"'.base64_encode($hk[0]).'"}}';
 	}
-	public function checkPwdAndForm($id,$pwd1,$salt,$hash,$id2,$pwd2){
-		global $vars;
+	public function checkPwdAndForm($id,$pwd1,$salt,$hash,$id2,$pwd2,$passwdtype,$updateOld = false){
+		global $vars,$sql;
 		if(!$this->validateForm($id2,$pwd2)){
 			return 1;
 		}
 		$pwd = $this->getPwdFromKey($id,$pwd1);
-		$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
-		if(Password::hash($pwd,$hSalt)!=$hash){
+		$hSalt = $this->hash($salt,$vars->get('private_salt_key'),$passwdtype);
+		if($this->hash($pwd,$hSalt,$passwdtype)!=$hash){
 			return 2;
+		}
+		if($updateOld!==false && $passwdtype != $this->newestPwdType){
+			// ALERT! Not the newest hash type! So let's re-hash the passwd
+			$hSalt = $this->hash($salt,$vars->get('private_salt_key'));
+			$hash = $this->hash($pwd,$hSalt);
+			$sql->query("UPDATE `users` SET `passwd`='%s',`passwdtype`=%d WHERE `id`=%d",[$hash,(int)$this->newestPwdType,(int)$updateOld]);
 		}
 		return false;
 	}
@@ -131,15 +149,16 @@ class Security{
 			return $_SESSION['id']!==false;
 		}
 		$res = $sql->query("SELECT session FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
-		if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$res['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
+		if($this->hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])!=$res['session'] && !(isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
 			$_SESSION['id'] = false;
 			unset($_COOKIE['session-id']);
 			setcookie('session-id',null,-1);
 			return false;
 		}
-		if(Password::hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])==$res['session'] && (isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
+		if($this->hash($_COOKIE['session-id'],$_SERVER['REMOTE_ADDR'])==$res['session'] && (isset($_SESSION['overrideLoginCheck']) && $_SESSION['overrideLoginCheck'])){
 			$_SESSION['overrideLoginCheck'] = false;
 		}
+		$this->checkedSessKey = true;
 		return $_SESSION['id']!==false;
 	}
 }
@@ -171,17 +190,17 @@ class Analytics{
 	private $params;
 	private function addNum($t,$s = ''){
 		$this->query .= "
-			INSERT INTO analytics (type,path)
-				SELECT %d,'%s' FROM analytics WHERE NOT EXISTS (
-					SELECT %d AS tmp FROM analytics WHERE
-						(MONTH(ts) = MONTH(NOW()) AND YEAR(ts) = YEAR(NOW()) AND type=%d AND path='%s')
+			INSERT INTO `analytics` (`type`,`path`)
+				SELECT %d,'%s' FROM `analytics` WHERE NOT EXISTS (
+					SELECT %d AS tmp FROM `analytics` WHERE
+						(MONTH(`ts`) = MONTH(NOW()) AND YEAR(`ts`) = YEAR(NOW()) AND `type`=%d AND `path`='%s')
 					) LIMIT 1;
-			UPDATE analytics SET counter = counter + 1 WHERE (MONTH(ts) = MONTH(NOW()) AND YEAR(ts) = YEAR(NOW()) AND path='%s' AND type=%d);";
+			UPDATE `analytics` SET `counter` = `counter` + 1 WHERE (MONTH(`ts`) = MONTH(NOW()) AND YEAR(`ts`) = YEAR(NOW()) AND `path`='%s' AND `type`=%d);";
 		$this->params = array_merge($this->params,[$t,$s,$t,$t,$s,$s,$t]);
 	}
 	private function runQuery(){
 		global $sql;
-		$sql->query($this->query,$this->params,true);
+		$sql->query($this->query,$this->params,true,MYSQLI_ASYNC);
 		$this->query = '';
 		$this->params = [];
 	}
@@ -235,7 +254,7 @@ class Analytics{
 				'Total Visits: '.$this->getData(10,$m,$y,'c').'/'.$this->getData(3,$m,$y,'c').'<br>'.
 				'<br>'.$this->getAllTables($m,$y);
 	}
-	public function __construct(){
+	public function run(){
 		global $user_info,$fileExtention,$security,$otherPages;
 		$this->query = '';
 		$this->params = [];
@@ -283,15 +302,20 @@ class Page{
 		imagestring($img,7,0,0,"Couldn't find image.",imagecolorallocate($img, 255, 255, 255));
 		return $img;
 	}
+	private function getBasePath($pathPartsParsed){
+		return 'http://'.$_SERVER['HTTP_HOST'].'/'.implode('/',$pathPartsParsed);
+	}
 	public function do404() {
 		header('HTTP/1.0 404 Not Found');
-		ob_end_clean();
 		return 'Error 404: page not found<br>I just don\'t know what went wrong!';
 	}
 	private function getQuickLinks($lang,$pathPartsParsed){
 		global $sql;
 		$quickLinks = '';
 		$temp = $pathPartsParsed;
+		if(sizeof($temp) > 1 && strtolower($temp[sizeof($temp)-1])=='index'){
+			array_pop($temp);
+		}
 		$link = explode("/",$_SERVER['REQUEST_URI']);
 		$getParams = 'title_%s';
 		do{
@@ -310,7 +334,7 @@ class Page{
 			}
 			$p = $sql->query($query,array_merge([$lang],$temp),0);
 			$name = $p['title_'.$lang];
-			if(!$name){
+			if(!$name && isset($link[sizeof($temp)])){
 				$goodlink = explode('.',$link[sizeof($temp)]);
 				$goodlink = explode('?',$goodlink[0]);
 				$name = strtoupper(substr($goodlink[0],0,1)).substr($goodlink[0],1);
@@ -329,6 +353,7 @@ class Page{
 					$headStuff.
 					'<link rel="stylesheet" type="text/css" href="/style.css">'.
 					'<link rel="icon" type="image/png" href="/media/favicon.png">'.
+					'<base href="'.$this->getBasePath($pathPartsParsed).'">'.
 					'<meta http-equiv="content-type" content="text/html; charset=UTF-8">'.
 					'<script type="text/javascript" src="/jquery-2.0.3.min.js"></script>'.
 					'<script type="text/javascript" src="/homepage.js.php"></script>'.
@@ -340,15 +365,21 @@ class Page{
 							'doHistory = true;'.
 							'if(history.pushState){'.
 								'homepage.get(url+((url.indexOf("?")!=-1)?"&json":"?json"),function(page){'.
-									'$("article").html(page.content);'.
-									'$("title").html(page.title);'.
-									'$("#quickLinks").html(page.quickLinks);'.
-									'$("#permalink > a").attr("data-pageid",page.id);'.
-									'$("#queryNum").text(page.queries);'.
-									'if(doHistory){'.
-										'history.pushState({},page.title,(page.url!=undefined?page.url:url));'.
+									'if(!page.content){'.
+										'window.location=url;'.
+									'}else{'.
+										'$("article").html(page.content);'.
+										'$("title").html(page.title);'.
+										'$("#quickLinks").html(page.quickLinks);'.
+										'$("#permalink > a").attr("data-pageid",page.id);'.
+										'$("#queryNum").text(page.queries);'.
+										'$("#secondsCount").text(page.seconds);'.
+										'$("base").attr("href",page.basePath);'.
+										'if(doHistory){'.
+											'history.pushState({},page.title,(page.url!=undefined?page.url:url));'.
+										'}'.
+										'parseLinks();'.
 									'}'.
-									'parseLinks();'.
 								'});'.
 							'}else{'.
 								'window.location=url;'.
@@ -407,19 +438,46 @@ class Page{
 					'</div>'.
 					'<div id="content">';
 	}
+	private function getAdScript(){ // this is triggered AFTER the getFooter scripts
+		return '<script type="text/javascript">'.
+				'function newAds(){'.
+					'var prevHTML = $("#ads").html();'.
+					'$("#ads").empty().append('.
+						'$("<script>").attr({'.
+							'async:"",'.
+							'src:"//pagead2.googlesyndication.com/pagead/js/adsbygoogle.js"'.
+						'}),'.
+						'$("<ins>").addClass("adsbygoogle").css({'.
+							'display:"inline-block",'.
+							'width:200,'.
+							'height:600,'.
+							'float:"left",'.
+							'marginTop:$("nav>ul").height()+20,'.
+							'marginRight:10'.
+						'}).attr({'.
+							'"data-ad-client":"ca-pub-9434029170873885",'.
+							'"data-ad-slot":"3220009654"'.
+						'}).html(prevHTML)'.
+					');'.
+					'(adsbygoogle = window.adsbygoogle || []).push({});'.
+					'$("article").css("min-height",$("nav>ul").height()+20+600);'.
+				'}'.
+				'newAds();'.
+			'</script>';
+	}
 	private function getFooter(){
-		global $security,$sql;
+		global $security,$sql,$startTime;
 		return '</div>'.
 					'<script type="text/javascript">'.
 						'$("article").css("min-height",$("nav>ul").height()+20);'.
 					'</script>'.
 					'<footer>'.
-						'Page generated succesfully with <span id="queryNum">'.$sql->getQueryNum().'</span> queries. ©Sorunome 2011-'.date('Y',time()).
+						'Page generated succesfully with <span id="queryNum">'.$sql->getQueryNum().'</span> queries in <span id="secondsCount">'.(microtime(true)-$startTime).'</span> seconds. ©Sorunome 2011-'.date('Y',time()).
 					'</footer>'.
 					'</div>'.
 					'<script type="text/javascript">'.
 						'function parseLinks(){'.
-							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a[href^="/"]\').off("click").click(function(e){'.
+							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a:not([href*="://"])\').filter(\'[data-quick!="false"]\').off("click").click(function(e){'.
 								'if(e.button==0){'.
 									'if(!($(this).attr("data-quick")=="false" || this.href.indexOf(".zip")!=-1)){'.
 										'e.preventDefault();'.
@@ -430,6 +488,7 @@ class Page{
 						'}'.
 						'parseLinks();'.
 					'</script>'.
+					$this->getAdScript().
 				'</body>'.
 			'</html>';
 	}
@@ -487,14 +546,47 @@ class Page{
 			$vars->set('cache_nav_'.$lang,$this->createNav());
 		}
 		$navJSON = $vars->get('cache_nav_'.$lang);
-		if($security->isLoggedIn() && $user_info['power']&16){
-			$navJSON['inner'][] = [
-				'name' => 'Edit',
-				'href' => '/edit/structure',
-				'inner' => [],
-				'settings' => 1,
-				'id' => NULL
-			];
+		if($security->isLoggedIn()){
+			if($user_info['power']&32){
+				$navJSON['inner'][] = [
+					'name' => 'Reuben3 Dev',
+					'href' => '/reuben3',
+					'inner' => [
+						[
+							'name' => 'Sprite editor',
+							'href'=> '/reuben3/sprites',
+							'inner' => [],
+							'settings' => 0,
+							'id' => NULL
+						],
+						[
+							'name' => 'Tilemap editor',
+							'href' => '/reuben3/tilemaps',
+							'inner' => [],
+							'settings' => 0,
+							'id' => NULL
+						],
+						[
+							'name' => 'Create',
+							'href' => '/reuben3/create',
+							'inner' => [],
+							'settings' => 0,
+							'id' => NULL
+						]
+					],
+					'settings' => 0,
+					'id' => NULL
+				];
+			}
+			if($user_info['power']&16){
+				$navJSON['inner'][] = [
+					'name' => 'Edit',
+					'href' => '/edit/structure',
+					'inner' => [],
+					'settings' => 1,
+					'id' => NULL
+				];
+			}
 		}
 		return '<nav>'.$this->createNavHTML($navJSON['inner']).'</nav>';
 	}
@@ -508,12 +600,13 @@ class Page{
 		header('Cache-Control: max-age=2592000');
 	}
 	public function getPage($title,$content,$lang,$pathPartsParsed,$settings = 1,$id = 0){
-		global $sql,$security;
+		global $sql,$security,$startTime;
 		if(!isset($_GET['json'])){
 			$pageHTML = '';
 			if((int)$settings & 1){
 				$pageHTML.=$this->getHeader($title,$lang,$pathPartsParsed,'',$id);
 				$pageHTML.=$this->getNav();
+				$pageHTML.='<div id="ads">Please support me by enabling ads!</div>';
 				$pageHTML.='<article>'.$content.'</article>';
 				$pageHTML.=$this->getFooter();
 			}else{
@@ -521,15 +614,21 @@ class Page{
 			}
 		}else{
 			header('Content-Type: text/json');
+			$basePath = $this->getBasePath($pathPartsParsed);
 			$quicklinksHTML = $this->getQuickLinks($lang,$pathPartsParsed);
+			if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])=='index'){
+				array_pop($pathPartsParsed);
+			}
 			$pageHTML = json_encode([
 				'title' => $title,
 				'content' => $content,
 				'quickLinks' => $quicklinksHTML,
 				'queries' => $sql->getQueryNum(),
+				'seconds' => (microtime(true)-$startTime),
 				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn(),
 				'id' => $id,
-				'url' => '/'.implode('/',$pathPartsParsed)
+				'url' => '/'.implode('/',$pathPartsParsed),
+				'basePath' => $basePath
 			]);
 		}
 		return $pageHTML;
@@ -561,6 +660,69 @@ class Page{
 		}
 		return $html;
 	}
+	public function getCommentsHTML($pid,$canComment){
+		return '<hr>'.
+					'<h2>Comments</h2>'.
+					($canComment?
+						'<span id="topComment"></span>':
+						'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!').
+					'<br>'.
+					($this->getComments($pid,$canComment)).
+					'<script type="text/javascript">'.
+						'(function($){'.
+							'var getReplyForm = function(refId){'.
+									'return $("<div>")'.
+										'.append('.
+											'$("<span>")'.
+												'.css("font-size","18px")'.
+												'.text("Reply:"),'.
+											'"<br>",'.
+											'$("<form>")'.
+												'.append('.
+													(!$canComment?
+														'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':'').
+													'$("<textarea>")'.
+														'.attr("maxlength","500")'.
+														'.css({"width":"90%","height":"105px"}),'.
+													'$("<input>")'.
+														'.attr({"type":"text","name":"pageId"})'.
+														'.css("display","none")'.
+														'.val("'.$pid.'"),'.
+													'$("<input>")'.
+														'.attr({"type":"text","name":"refId"})'.
+														'.css("display","none")'.
+														'.val(refId),'.
+													'"<br>",'.
+													'$("<input>")'.
+														'.attr("type","submit")'.
+														'.val("Post")'.
+												')'.
+												'.submit(function(e){'.
+													'e.preventDefault();'.
+													'var form = this;'.
+													'homepage.get("/getKeys",function(keys){'.
+														'homepage.post("/comment",{'.
+															(!$canComment?
+																'name:$(form).find(\'[name="name"]\').val(),':'').
+															'comment:$(form).find("textarea").val(),'.
+															'pageId:$(form).find(\'[name="pageId"]\').val(),'.
+															'refId:$(form).find(\'[name="refId"]\').val(),'.
+															'fkey:keys.form.key,'.
+															'fid:keys.form.id'.
+														'},function(data){'.
+															'$(form).parent().html(data);'.
+															'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
+														'});'.
+													'})'.
+												'})'.
+										')'.
+								'};'.
+							'try{$(".reply").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
+							'$("#topComment").append(getReplyForm(-1));}catch(e){}'.
+						'})(jQuery)'.
+					'</script>'.
+					'<br>';
+	}
 	public function getPathFromId($id){
 		global $sql;
 		$pathParts = [];
@@ -576,9 +738,8 @@ class Page{
 		}while($id!=1);
 		return '/'.implode('/',array_reverse($pathParts));
 	}
-	public function getPageFromSQL($pathPartsParsed,$lang){
-		global $bbParser,$user_info,$sql,$security;
-		//var_dump($user_info);
+	public function getIdFromSQL($pathPartsParsed){
+		global $sql;
 		if(isset($pathPartsParsed[0]) && $pathPartsParsed[sizeof($pathPartsParsed)-1]=='index'){
 			unset($pathPartsParsed[sizeof($pathPartsParsed)-1]);
 		}
@@ -586,10 +747,10 @@ class Page{
 			$pathPartsParsed[0] = 'index';
 		}
 		$query = '';
-		$getParams = 'ts,content_%s,title_%s,settings,id';
+		$getParams = 'ts';
 		for($i=sizeof($pathPartsParsed)-1;$i>=0;$i--){
 			if(sizeof($pathPartsParsed)==1){
-				$query = "SELECT $getParams FROM pages WHERE name='%s' AND refId='1'";
+				$query = "SELECT id FROM pages WHERE name='%s' AND refId='1'";
 				break;
 			}
 			if($i==sizeof($pathPartsParsed)-1){
@@ -597,28 +758,34 @@ class Page{
 			}elseif($i!=0){
 				$query = "SELECT id FROM pages WHERE refId=($query) AND name='%s'";
 			}else{
-				$query = "SELECT $getParams FROM pages WHERE refId=($query) AND name='%s'";
+				$query = "SELECT id FROM pages WHERE refId=($query) AND name='%s'";
 			}
 		}
-		$p = $sql->query($query,array_merge([$lang,$lang],$pathPartsParsed),0);
+		$p = $sql->query($query,$pathPartsParsed,0);
+		return $p['id'];
+	}
+	public function getPageFromSQL($pathPartsParsed,$lang,$id){
+		global $bbParser,$user_info,$sql,$security;
+		$p = $sql->query("SELECT ts,content_%s,title_%s,settings,id FROM pages WHERE id=%d",[$lang,$lang,$id],0);
 		if($p['id']==1){ // index
 			$bbParser->addTag('news',function($type,$s,$attrs,$bbParser){
 				global $sql;
-				$res = $sql->query("SELECT `news_en`,`ts`,`id` FROM news ORDER BY ts DESC",[]);
-				$returnHTML = '<table style="background-color:#5D7859;border:1px solid black;border-collapse:collapse;"><tr><th>Date</th><th>News</th></tr>';
+				$res = $sql->query("SELECT `news_en`,`ts`,`id` FROM `news` ORDER BY `ts` DESC LIMIT 5",[]);
+				$returnHTML = '<table style="background-color:#5D7859;border:1px solid black;border-collapse:collapse;width:100%;"><tr><th>Date</th><th>News</th></tr>';
 				foreach($res as $r){
 					$returnHTML .= '<tr id="news'.$r['id'].'"><td style="border:1px solid black;border-collapse:collapse;">'.date('jS F Y',strtotime($r['ts'])).'</td><td style="border:1px solid black;border-collapse:collapse;">'.$bbParser->parse($r['news_en']).'</td></tr>';
 				}
 				return $returnHTML.'</table>';
 			},[],'Creates the news table');
 		}
-		if($p['id']!=NULL){
+		if($id!==NULL && $p['id']!=NULL){
 			if($p['settings'] & 16){ // page link thingy
 				if(!isset($_GET['json'])){ // if user visits directly then redirect
 					header('Location: /?pageid='.(int)$p['content_'.$lang]);
 					die();
 				}
 				$pathPartsParsed = explode('/',$this->getPathFromId((int)$p['content_'.$lang]));
+				$pathPartsParsed[] = 'index'; // for <base>
 				array_shift($pathPartsParsed); // get rid of first empty element
 				$p = $sql->query("SELECT $getParams FROM pages WHERE id=%d",[$lang,$lang,(int)$p['content_'.$lang]],0);
 			}
@@ -685,68 +852,7 @@ class Page{
 						'</script>';
 			}
 			if($p['settings'] & 4){
-				$commentsHTML = $this->getComments($p['id'],$security->isLoggedIn() || $p['settings'] & 8);
-				$html .= '<hr>'.
-						'<h2>Comments</h2>'.
-						($security->isLoggedIn() || $p['settings'] & 8?
-							'<span id="topComment"></span>':
-							'You need to <a href="/account/login">Log In</a> or <a href="/account/register">Register</a> to leave a comment!').
-						'<br>'.
-						$commentsHTML.
-						'<script type="text/javascript">'.
-							'(function($){'.
-								'var getReplyForm = function(refId){'.
-										'return $("<div>")'.
-											'.append('.
-												'$("<span>")'.
-													'.css("font-size","18px")'.
-													'.text("Reply:"),'.
-												'"<br>",'.
-												'$("<form>")'.
-													'.append('.
-														(!$security->isLoggedIn() && $p['settings'] & 8?
-															'"Name: ",$("<input>").attr({"type":"text","name":"name","maxlength":"50"}).val("Guest"),':'').
-														'$("<textarea>")'.
-															'.attr("maxlength","500")'.
-															'.css({"width":"90%","height":"105px"}),'.
-														'$("<input>")'.
-															'.attr({"type":"text","name":"pageId"})'.
-															'.css("display","none")'.
-															'.val("'.$p['id'].'"),'.
-														'$("<input>")'.
-															'.attr({"type":"text","name":"refId"})'.
-															'.css("display","none")'.
-															'.val(refId),'.
-														'"<br>",'.
-														'$("<input>")'.
-															'.attr("type","submit")'.
-															'.val("Post")'.
-													')'.
-													'.submit(function(e){'.
-														'e.preventDefault();'.
-														'var form = this;'.
-														'homepage.get("/getKeys",function(keys){'.
-															'homepage.post("/comment",{'.
-																(!$security->isLoggedIn() && $p['settings'] & 8?
-																	'name:$(form).find(\'[name="name"]\').val(),':'').
-																'comment:$(form).find("textarea").val(),'.
-																'pageId:$(form).find(\'[name="pageId"]\').val(),'.
-																'refId:$(form).find(\'[name="refId"]\').val(),'.
-																'fkey:keys.form.key,'.
-																'fid:keys.form.id'.
-															'},function(data){'.
-																'$(form).parent().html(data);'.
-																'$(".reply").off("click").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
-															'});'.
-														'})'.
-													'})'.
-											')'.
-									'};'.
-								'try{$(".reply").click(function(e){e.preventDefault();$(this).parent().after(getReplyForm($(this).attr("href")));});'.
-								'$("#topComment").append(getReplyForm(-1));}catch(e){}'.
-							'})(jQuery)'.
-						'</script>'.
-						'<br>';
+				$html .= $this->getCommentsHTML($p['id'],$security->isLoggedIn() || $p['settings'] & 8);
 			}
 			echo $this->getPage($p['title_'.$lang],$html,$lang,$pathPartsParsed,$p['settings'],$p['id']);
 		}else{
@@ -1011,8 +1117,12 @@ if(sizeof($pathPartsParsed) == 1 && preg_match('/^[0-9]+$/',$pathPartsParsed[0])
 	header('Location: '.$page->getPathFromId((int)$pathPartsParsed[0]));
 	exit; // good bye
 }
-
-$analytics = new Analytics();
+if(sizeof($pathPartsParsed) == 0){
+	$pathPartsParsed = ['index'];
+}
+$analytics = new Analytics(); //sloooooow
+$analytics->run();
+ob_end_clean();
 switch($pathPartsParsed[0]){
 	case 'analytics':
 		if($security->isLoggedIn() && $user_info['power']&8){
@@ -1098,6 +1208,7 @@ switch($pathPartsParsed[0]){
 					echo $page->getPage('Account Key',$pageHTML,$lang,$pathPartsParsed);
 					break;
 				case 'logout':
+					setcookie('shouldlogin','',time()-10,'/');
 					$_SESSION['id'] = false;
 					session_destroy();
 					echo $page->getPage('Log Out','You are now logged out.'.
@@ -1116,14 +1227,14 @@ switch($pathPartsParsed[0]){
 						$user = $sql->query("SELECT id,power,longtimepwd,longtimesalt FROM users WHERE id='%s'",[$_POST['uid']],0);
 						if(!isset($user['id']))
 							die('{"success":false}');
-						if($security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['longtimesalt'],$user['longtimepwd'],$_POST['fid'],$_POST['fkey']))
+						if($security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['longtimesalt'],$user['longtimepwd'],$_POST['fid'],$_POST['fkey'],-1)) // for checking the longtimepwd we force the user to have the newest hash
 							die('{"success":false}');
 						if(!$user['power']&1)
 							die('{"success":false}');
 						$_SESSION['id'] = $user['id'];
 						$_SESSION['overrideLoginCheck'] = true;
 						$session_id = $security->generateRandomString(50);
-						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[$security->hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
 						echo json_encode([
 							'success' => true,
 							'sessid' => $session_id
@@ -1141,23 +1252,32 @@ switch($pathPartsParsed[0]){
 						if(strlen($pwd)<1)
 							die('{"success":false,"message":"ERROR: No password entered!"}');
 						$salt = Password::generateSalt(50);
-						$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
-						$hash = Password::hash($pwd,$hSalt);
+						$hSalt = $security->hash($salt,$vars->get('private_salt_key')); // as this is the long time pwd we just use the most recent hash method. User will get logged out if we add a new one
+						$hash = $security->hash($pwd,$hSalt);
 						$sql->query("UPDATE users SET longtimepwd='%s',longtimesalt='%s' WHERE id='%s'",[$hash,$salt,$_SESSION['id']]);
 						echo '{"success":true,"message":"Success","id":"'.$_SESSION['id'].'"}';
 					}else{
 						if(!isset($_POST['name']) || !isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fkey']) || !isset($_POST['fid']))
 							die('{"success":false,"message":"ERROR: Missing required field"}');
-						$user = $sql->query("SELECT id,power,passwd,salt FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
+						$user = $sql->query("SELECT id,power,passwd,salt,passwdtype FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
 						if(!isset($user['id']))
 							die('{"success":false,"message":"ERROR: User doesn\'t exist!"}');
 						if(!$user['power']&1)
 							die('{"success":false,"message":"ERROR: Account not activated!"}');
-						if($security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey']))
-							die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
+						if($errno = $security->checkPwdAndForm($_POST['id'],$_POST['pwd'],$user['salt'],$user['passwd'],$_POST['fid'],$_POST['fkey'],(int)$user['passwdtype'],(int)$user['id'])){
+							switch($errno){
+								case 1:
+									die('{"success":false,"message":"ERROR logging in, please refresh the page and try again."}');
+								case 2:
+									die('{"success":false,"message":"ERROR wrong password."}');
+								default:
+									die('{"success":false,"message":"ERROR logging in, unkown error.  Please report this! Errno:'.$errno.'"}');
+							}
+						}
 						$_SESSION['id'] = $user['id'];
 						$session_id = $security->generateRandomString(50);
-						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[Password::hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						$sql->query("UPDATE users SET session='%s' WHERE id='%s'",[$security->hash($session_id,$_SERVER['REMOTE_ADDR']),$user['id']]);
+						// we successfully logged in
 						echo json_encode([
 							'success' => true,
 							'message' => 'Success',
@@ -1172,7 +1292,7 @@ switch($pathPartsParsed[0]){
 						die('ERROR: Missing required field');
 					if(!filter_var($_POST['email'],FILTER_VALIDATE_EMAIL))
 						die('ERROR: Not a valid email!');
-					if(!preg_match("/^[0-9a-zA-Z ]+$/",$_POST['name']))
+					if(!preg_match("/^[0-9a-zA-Z]+[0-9a-zA-Z _]*[0-9a-zA-Z]+$/",$_POST['name']))
 						die('ERROR: Not a valid username!');
 					$user = $sql->query("SELECT id FROM users WHERE LOWER(name)=LOWER('%s')",[$_POST['name']],0);
 					if(isset($user['id']))
@@ -1184,10 +1304,10 @@ switch($pathPartsParsed[0]){
 						die('ERROR: Invalid session, please refresh the page');
 					$activationKey = $security->generateRandomString(50);
 					$salt = Password::generateSalt(50);
-					$hSalt = Password::hash($salt,$vars->get('private_salt_key'));
-					$hash = Password::hash($pwd,$hSalt);
-					$sql->query("INSERT INTO users (name,passwd,salt,email,randkey,joindate) VALUES ('%s','%s','%s','%s','%s','%s')",
-						[$_POST['name'],$hash,$salt,$_POST['email'],$activationKey,time()]);
+					$hSalt = $security->hash($salt,$vars->get('private_salt_key')); // we register and thus use the newest hash method
+					$hash = $security->hash($pwd,$hSalt);
+					$sql->query("INSERT INTO users (name,passwd,salt,email,randkey,joindate,passwdtype) VALUES ('%s','%s','%s','%s','%s','%s',%d)",
+						[$_POST['name'],$hash,$salt,$_POST['email'],$activationKey,time(),(int)$security->newestPwdType]);
 					$id = $sql->query("SELECT id FROM users WHERE name='%s'",[$_POST['name']],0);
 					$mailMessage = implode([
 						'Hey there '.$_POST['name'].',',
@@ -1204,11 +1324,11 @@ switch($pathPartsParsed[0]){
 					echo 'Sent verification email, please check your spam folder!';
 					break;
 				default:
-					$page->getPageFromSQL($pathPartsParsed,$lang);
+					$page->getPageFromSQL($pathPartsParsed,$lang,$page->getIdFromSQL($pathPartsParsed));
 					break;
 			}
 		}else{
-			echo 'yay';
+			echo $page->getPage('Nope','<script type="text/javascript">getPageJSON("/");</script>Redirecting...',$lang,$pathPartsParsed);
 		}
 		break;
 	case 'edit':
@@ -1262,7 +1382,7 @@ switch($pathPartsParsed[0]){
 		}
 		break;
 	default:
-		switch($fileExtention) {
+		switch(strtolower($fileExtention)){
 			case 'zip':
 				if($file = file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					header('Content-Description: File Transfer');
@@ -1297,9 +1417,7 @@ switch($pathPartsParsed[0]){
 				}
 				break;
 			case 'jpg':
-			case 'JPG':
 			case 'jpeg':
-			case 'JPEG':
 			case 'png':
 				$imgNewWidth = -1;
 				$imgNewHeight = -1;
@@ -1322,13 +1440,10 @@ switch($pathPartsParsed[0]){
 				}
 				if($imgNewHeight>$height)$imgNewHeight = $height;
 				if($imgNewWidth>$width)$imgNewWidth = $width;
-				switch ($fileExtention) {
+				switch(strtolower($fileExtention)){
 					case 'jpg':
-					case 'JPG':
 					case 'jpeg':
-					case 'JPEG':
 						header('Content-Type: image/jpeg');
-						ob_end_clean();
 						$img = @imagecreatefromjpeg($imgFileName);
 						if (!$img) {
 							imagejpeg(getImageNotFound());
@@ -1344,7 +1459,6 @@ switch($pathPartsParsed[0]){
 						break;
 					case 'png':
 						header('Content-Type: image/png');
-						ob_end_clean();
 						$img = @imagecreatefrompng($imgFileName);
 						if (!$img) {
 							imagepng(getImageNotFound());
@@ -1371,20 +1485,39 @@ switch($pathPartsParsed[0]){
 				}
 				break;
 			case 'php':
-				if($fullPath!='/index.php' && $file = @file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
+				if($fullPath!='/index.php' && file_exists($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					session_write_close();
 					include_once($_SERVER['DOCUMENT_ROOT'].$fullPath);
 					break;
 				}
-				$page->getPageFromSQL($pathPartsParsed,$lang);
+				if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])!='index'){
+					$pathPartsParsed[] = 'index';
+				}
+				$page->getPageFromSQL($pathPartsParsed,$lang,$page->getIdFromSQL($pathPartsParsed));
 				break;
 			default:
-				ob_end_clean();
-				if($file = @file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
+				$pid = $page->getIdFromSQL($pathPartsParsed);
+				if($pid!==NULL){
+					if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])!='index'){
+						$pathPartsParsed[] = 'index';
+					}
+					$page->getPageFromSQL($pathPartsParsed,$lang,$pid);
+				}elseif($fullPath!='/' && file_exists($_SERVER['DOCUMENT_ROOT'].$fullPath.'/index.php')){
+					session_write_close();
+					$pathPartsParsed[] = 'index';
+					$fileExtention = 'php';
+					include_once($_SERVER['DOCUMENT_ROOT'].$fullPath.'/index.php');
+					break;
+				}elseif($fullPath!='/index' && file_exists($_SERVER['DOCUMENT_ROOT'].$fullPath.'.php')){
+					session_write_close();
+					$fileExtention = 'php';
+					include_once($_SERVER['DOCUMENT_ROOT'].$fullPath.'.php');
+					break;
+				}elseif($file = @file_get_contents($_SERVER['DOCUMENT_ROOT'].$fullPath)){
 					header('Content-Type: text/'.$fileExtention);
 					echo $file;
 				}else{
-					$page->getPageFromSQL($pathPartsParsed,$lang);
+					echo $page->getPage('404 not found',$page->do404(),$lang,$pathPartsParsed);
 				}
 				break;
 		}
