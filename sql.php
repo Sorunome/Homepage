@@ -81,6 +81,10 @@ class Sql{
 		$this->curDb = $db;
 		return $this->connectSql()->select_db($db);
 	}
+	public function insertId(){
+		$mysqli = $this->connectSql();
+		return $mysqli->insert_id;
+	}
 }
 $sql = new Sql();
 ?>

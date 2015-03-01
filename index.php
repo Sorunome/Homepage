@@ -477,7 +477,7 @@ class Page{
 					'</div>'.
 					'<script type="text/javascript">'.
 						'function parseLinks(){'.
-							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a:not([href*="://"])\').filter(\'[data-quick!="false"]\').off("click").click(function(e){'.
+							'$(\'a[href^="http://'.$_SERVER['HTTP_HOST'].'"],a:not([href*="://"])\').filter(\'[data-quick!="false"]\').filter(\'[href]\').filter(\'[target!="_blank"]\').off("click").click(function(e){'.
 								'if(e.button==0){'.
 									'if(!($(this).attr("data-quick")=="false" || this.href.indexOf(".zip")!=-1)){'.
 										'e.preventDefault();'.
@@ -862,35 +862,65 @@ class Page{
 }
 $page = new Page();
 class Edit{
-	private function createStructureHTML($obj){
+	private function createStructureHTML($obj,$refId = 1){
 		global $lang;
 		
 		$s = '';
 		$t = '';
 		$btns = ' <a class="structureUp">^</a> <a class="structureDown">v</a>';
+		
+		$first1 = true;
+		$first2 = true;
 		foreach($obj as $o){
 			if(($o['settings'] & 16)==1){
 				$s .= '<li>'.$o['name'].'</li>';
 			}else{
 				if($o['settings']&2){
-					if($o['id']!==NULL){
-						$t .= '<li><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$this->createStructureHTML($o['inner']).'</li>';
+					if($first1){
+						$moreBtns = '';
 					}else{
-						$t .= '<li>'.$o['name'].'</a>'.$this->createStructureHTML($o['inner']).'</li>';
+						$moreBtns = ' <a class="structureRight">&gt;</a>';
 					}
+					if($refId!=1){
+						$moreBtns = ' <a class="structureLeft">&lt;</a>'.$moreBtns;
+					}
+					
+					if($o['id']!==NULL){
+						$t .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$moreBtns.$this->createStructureHTML($o['inner'],$o['id']).'</li>';
+					}else{
+						$t .= '<li>'.$o['name'].'</a>'.$this->createStructureHTML($o['inner'],-1).'</li>';
+					}
+					$first1 = false;
 				}else{
-					if($o['id']!==NULL){
-						$s .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner']).'</li>';
+					if($first2){
+						$moreBtns = '';
 					}else{
-						$s .= '<li>'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner']).'</li>';
+						$moreBtns = ' <a class="structureRight">&gt;</a>';
 					}
+					if($refId!=1){
+						$moreBtns = ' <a class="structureLeft">&lt;</a>'.$moreBtns;
+					}
+					
+					if($o['id']!==NULL){
+						$s .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$btns.$moreBtns.$this->createStructureHTML($o['inner'],$o['id']).'</li>';
+					}else{
+						$s .= '<li>'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner'],-1).'</li>';
+					}
+					$first2 = false;
 				}
 			}
 		}
+		if($refId!=-1){
+			$j = '<li><a href="/edit/new?refid='.$refId.'"> + New</a></li>';
+		}else{
+			$j = '';
+		}
 		if($s!==''){
+			$s .= $j;
 			$s = '<ul>'.$s.'</ul>';
 		}
 		if($t!==''){
+			$t .= $j;
 			$s .= '<hr><ul>'.$t.'</ul>';
 		}
 		return $s;
@@ -1048,9 +1078,25 @@ class Edit{
 									'saveStructure($elem.parent().parent());'.
 								'}'.
 							'});'.
+							
 						'})();'.
 					'</script>';
 				echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
+			}
+		}else{
+			echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
+		}
+	}
+	public function newPage($refid){
+		global $security,$user_info,$page,$vars,$lang,$pathPartsParsed,$sql;
+		if($security->isLoggedIn() && $user_info['power']&16){
+			$r = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d",[$refid],0);
+			if($r!==NULL){
+				$newSorder = $sql->query("SELECT MAX(`sorder`)+1 as `n` FROM `pages` WHERE `refId`=%d",[$refid],0);
+				$sql->query("INSERT INTO `pages` (`refId`,`sorder`) VALUES (%d,%d)",[$refid,$newSorder['n']]);
+				echo $page->getPage('Nope','<script type="text/javascript">getPageJSON("/edit/structure?pid='.($sql->insertId()).'");</script>Redirecting...',$lang,$pathPartsParsed);
+			}else{
+				echo $page->getPage('Error','<b>Error:</b> refid not found',$lang,$pathPartsParsed);
 			}
 		}else{
 			echo $page->getPage('Error','<b>Error:</b> Permission denied',$lang,$pathPartsParsed);
@@ -1361,6 +1407,13 @@ switch($pathPartsParsed[0]){
 					break;
 				case 'structure':
 					$edit->dispStructure();
+					break;
+				case 'new':
+					if(isset($_GET['refid']) && (int)$_GET['refid']==$_GET['refid']){
+						$edit->newPage((int)$_GET['refid']);
+					}else{
+						echo $page->getPage('Error','<b>Error:</b> missing parameter',$lang,$pathPartsParsed);
+					}
 					break;
 				case 'savestructure':
 					$edit->saveStructure($_GET['id'],$_POST);

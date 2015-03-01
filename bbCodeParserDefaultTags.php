@@ -4,7 +4,7 @@ function validate_url($url){
 	$r = ((strpos($url, "http://") === 0 || strpos($url, "https://") === 0) &&
 			filter_var($url, FILTER_VALIDATE_URL, FILTER_FLAG_SCHEME_REQUIRED | FILTER_FLAG_HOST_REQUIRED) !== false);
 	if(!$r){
-		return preg_match('@^[0-9a-zA-Z+ /#*._]+$@',$url) === 1;
+		return preg_match('@^[0-9a-zA-Z+ /#*._-]+$@',$url) === 1;
 	}
 	return $r;
 }
