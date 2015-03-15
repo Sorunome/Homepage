@@ -32,7 +32,6 @@ if(!isset($_SESSION['id'])){
 	$_SESSION['id']=false;
 }
 ob_start();
-include_once('config.php');
 $lang = 'en';
 /*
 Settings:
@@ -190,23 +189,28 @@ class Analytics{
 	private $params;
 	private function addNum($t,$s = ''){
 		$this->query .= "
-			INSERT INTO `analytics` (`type`,`path`)
-				SELECT %d,'%s' FROM `analytics` WHERE NOT EXISTS (
-					SELECT %d AS tmp FROM `analytics` WHERE
-						(MONTH(`ts`) = MONTH(NOW()) AND YEAR(`ts`) = YEAR(NOW()) AND `type`=%d AND `path`='%s')
-					) LIMIT 1;
-			UPDATE `analytics` SET `counter` = `counter` + 1 WHERE (MONTH(`ts`) = MONTH(NOW()) AND YEAR(`ts`) = YEAR(NOW()) AND `path`='%s' AND `type`=%d);";
-		$this->params = array_merge($this->params,[$t,$s,$t,$t,$s,$s,$t]);
+			INSERT INTO analytics_path (`url`)
+			VALUES('%s')
+			ON DUPLICATE KEY UPDATE  `url` = `url`;
+
+			INSERT INTO analytics (type,path_id,month,year)
+				VALUES (%d,(SELECT id FROM analytics_path WHERE hash=MD5('%s')),@MONTH,@YEAR)
+			ON DUPLICATE KEY UPDATE counter = counter + 1;";
+		$this->params = array_merge($this->params,[$s,$t,$s]);
 	}
 	private function runQuery(){
 		global $sql;
+		$this->query = "
+			SET @YEAR = EXTRACT(YEAR FROM now());
+			SET @MONTH = EXTRACT(MONTH FROM now());
+		".$this->query;
 		$sql->query($this->query,$this->params,true,MYSQLI_ASYNC);
 		$this->query = '';
 		$this->params = [];
 	}
 	private function getData($t,$m,$y,$i = false){
 		global $sql;
-		$query = $sql->query('SELECT counter AS c,path FROM analytics WHERE (type=%d AND MONTH(ts) = %d AND YEAR(ts) = %d) ORDER BY counter DESC LIMIT 10',[(int)$t,(int)$m,(int)$y]);
+		$query = $sql->query('SELECT a.counter AS c,ap.url AS path FROM analytics a,analytics_path ap WHERE (a.type = %d AND a.month = %d AND a.year = %d AND ap.id = a.path_id) ORDER BY counter DESC LIMIT 10',[(int)$t,(int)$m,(int)$y]);
 		if($i===false){
 			return $query;
 		}
@@ -234,7 +238,7 @@ class Analytics{
 				$msg = ['agents','Agent'];
 				break;
 			default:
-				return;
+				return '';
 		}
 		$html = '<b>Top 10 '.$msg[0].' this month:</b><br><table class="statstable"><tr><th>'.$msg[1].'</th><th>hits</th></tr>';
 		for($i=0;$i<sizeof($pages);$i++){
@@ -247,7 +251,7 @@ class Analytics{
 		return $this->getTable(9,$m,$y).$this->getTable(11,$m,$y).$this->getTable(5,$m,$y).$this->getTable(6,$m,$y);
 	}
 	public function getMonth($m,$y){
-		$date = DateTime::createFromFormat('m Y',$m.' '.$y);
+		$date = DateTime::createFromFormat('n Y',$m.' '.$y);
 		return '<b><u>Analytics for '.$date->format('F Y').'</u></b><br><br>'.
 				'Total Hits: '.$this->getData(7,$m,$y,'c').'/'.$this->getData(0,$m,$y,'c').'<br>'.
 				'Total Pages: '.$this->getData(8,$m,$y,'c').'/'.$this->getData(1,$m,$y,'c').'<br>'.
@@ -1176,15 +1180,17 @@ switch($pathPartsParsed[0]){
 				$pageHTML = '<h2>Analytics</h2><p><a href="/analytics">Back</a></p>';
 				$pageHTML .= $analytics->getMonth($_GET['m'],$_GET['y']);
 			}else{
-				$hits = $sql->query('SELECT counter AS c,UNIX_TIMESTAMP(ts) AS time FROM analytics WHERE type=0 ORDER BY ts DESC');
-				$files = $sql->query('SELECT counter AS c FROM analytics WHERE type=1 ORDER BY ts DESC');
-				$visits = $sql->query('SELECT counter AS c FROM analytics WHERE type=3 ORDER BY ts DESC');
-				$hitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=7 ORDER BY ts DESC');
-				$filesnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=8 ORDER BY ts DESC');
-				$visitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=10 ORDER BY ts DESC');
+				$hits = $sql->query('SELECT counter AS c,month,year FROM analytics WHERE type=0 ORDER BY year DESC, month DESC');
+				$files = $sql->query('SELECT counter AS c FROM analytics WHERE type=1 ORDER BY year DESC, month DESC');
+				$visits = $sql->query('SELECT counter AS c FROM analytics WHERE type=3 ORDER BY year DESC, month DESC');
+				$hitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=7 ORDER BY year DESC, month DESC');
+				$filesnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=8 ORDER BY year DESC, month DESC');
+				$visitsnb = $sql->query('SELECT counter AS c FROM analytics WHERE type=10 ORDER BY year DESC, month DESC');
 				$pageHTML = '<h2>Analytics</h2><table class="statstable"><tr><th>Month</th><th>Hits</th><th>Pages</th><th>Visits</th></tr>';
+				
 				for($i=0;$i<sizeof($hits);$i++){
-					$pageHTML .= '<tr><td><a href="/analytics?m='.date('m',$hits[$i]['time']).'&y='.date('Y',$hits[$i]['time']).'">'.date('F Y',$hits[$i]['time']).'</a></td><td>'.
+					$date = DateTime::createFromFormat('n Y',$hits[$i]['month'].' '.$hits[$i]['year']);
+					$pageHTML .= '<tr><td><a href="/analytics?m='.$hits[$i]['month'].'&y='.$hits[$i]['year'].'">'.$date->format('F Y').'</a></td><td>'.
 									(array_key_exists($i,$hitsnb)?$hitsnb[$i]['c']:0).'/'.(array_key_exists($i,$hits)?$hits[$i]['c']:0).'</td><td>'.
 									(array_key_exists($i,$filesnb)?$filesnb[$i]['c']:0).'/'.(array_key_exists($i,$files)?$files[$i]['c']:0).'</td><td>'.
 									(array_key_exists($i,$visitsnb)?$visitsnb[$i]['c']:0).'/'.(array_key_exists($i,$visits)?$visits[$i]['c']:0).'</td></tr>';
