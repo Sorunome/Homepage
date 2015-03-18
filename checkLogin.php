@@ -1,5 +1,5 @@
 <?php
-$encriptKeyToUse = 'key created while config';
+$encryptKeyToUse = 'key created while config';
 $oircUrl = 'link to omnomirc';
 $network = 1;
 
@@ -26,10 +26,11 @@ if(!isset($_GET['op'])){
 		$ts = time();
 		$key = htmlspecialchars(str_replace(';','%^%',$_GET['sid']));
 		$keyParts = explode('|',$key);
-		if(isset($keyParts[1]) && (int)$keyParts[1] < ($ts + 60) && (int)$keyParts[1] > ($ts - 60) && hash_hmac('sha512',(isset($_SERVER['HTTP_X_FORWARDED_FOR'])?$_SERVER['HTTP_X_FORWARDED_FOR']:$_SERVER['REMOTE_ADDR']),$encriptKeyToUse.$keyParts[1].$network) == $keyParts[0]
+		if(isset($keyParts[1]) && (int)$keyParts[1] < ($ts + 60) && (int)$keyParts[1] > ($ts - 60) && hash_hmac('sha512',(isset($_SERVER['HTTP_REFERER'])?$_SERVER['HTTP_REFERER']:'THE GAME'),$encryptKeyToUse.$keyParts[1].$network) == $keyParts[0]
 				&& $user_info['id']!==false && $user_info['power']&1){
 			$nick = $user_info['name'];
-			$signature = hash_hmac('sha512',$nick,$network.$encriptKeyToUse);
+			$time = (string)time();
+			$signature = $time.'|'.hash_hmac('sha512',$nick,$network.$encryptKeyToUse.$time);
 			$uid = $user_info['id'];
 		}
 	}
