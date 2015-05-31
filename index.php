@@ -160,6 +160,9 @@ class Security{
 		$this->checkedSessKey = true;
 		return $_SESSION['id']!==false;
 	}
+	public function getNewestPwdType(){
+		return $this->newestPwdType;
+	}
 }
 $security = new Security();
 
@@ -204,7 +207,7 @@ class Analytics{
 			SET @YEAR = EXTRACT(YEAR FROM now());
 			SET @MONTH = EXTRACT(MONTH FROM now());
 		".$this->query;
-		$sql->query($this->query,$this->params,true,MYSQLI_ASYNC);
+		$sql->query($this->query,$this->params,true);
 		$this->query = '';
 		$this->params = [];
 	}
@@ -251,7 +254,7 @@ class Analytics{
 		return $this->getTable(9,$m,$y).$this->getTable(11,$m,$y).$this->getTable(5,$m,$y).$this->getTable(6,$m,$y);
 	}
 	public function getMonth($m,$y){
-		$date = DateTime::createFromFormat('n Y',$m.' '.$y);
+		$date = DateTime::createFromFormat('n Y j',$m.' '.$y.' 1');
 		return '<b><u>Analytics for '.$date->format('F Y').'</u></b><br><br>'.
 				'Total Hits: '.$this->getData(7,$m,$y,'c').'/'.$this->getData(0,$m,$y,'c').'<br>'.
 				'Total Pages: '.$this->getData(8,$m,$y,'c').'/'.$this->getData(1,$m,$y,'c').'<br>'.
@@ -571,6 +574,13 @@ class Page{
 							'id' => NULL
 						],
 						[
+							'name' => 'Enemy editor',
+							'href' => '/reuben3/enemy',
+							'inner' => [],
+							'settings' => 0,
+							'id' => NULL
+						],
+						[
 							'name' => 'Create',
 							'href' => '/reuben3/create',
 							'inner' => [],
@@ -617,23 +627,27 @@ class Page{
 				$pageHTML = $content;
 			}
 		}else{
-			header('Content-Type: text/json');
-			$basePath = $this->getBasePath($pathPartsParsed);
-			$quicklinksHTML = $this->getQuickLinks($lang,$pathPartsParsed);
-			if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])=='index'){
-				array_pop($pathPartsParsed);
+			if((int)$settings & 1){
+				header('Content-Type: text/json');
+				$basePath = $this->getBasePath($pathPartsParsed);
+				$quicklinksHTML = $this->getQuickLinks($lang,$pathPartsParsed);
+				if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])=='index'){
+					array_pop($pathPartsParsed);
+				}
+				$pageHTML = json_encode([
+					'title' => $title,
+					'content' => $content,
+					'quickLinks' => $quicklinksHTML,
+					'queries' => $sql->getQueryNum(),
+					'seconds' => (microtime(true)-$startTime),
+					'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn(),
+					'id' => $id,
+					'url' => '/'.implode('/',$pathPartsParsed),
+					'basePath' => $basePath
+				]);
+			}else{
+				$pageHTML = 'not json'; // force the client to not call the json
 			}
-			$pageHTML = json_encode([
-				'title' => $title,
-				'content' => $content,
-				'quickLinks' => $quicklinksHTML,
-				'queries' => $sql->getQueryNum(),
-				'seconds' => (microtime(true)-$startTime),
-				'relogin' => isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn(),
-				'id' => $id,
-				'url' => '/'.implode('/',$pathPartsParsed),
-				'basePath' => $basePath
-			]);
 		}
 		return $pageHTML;
 	}
@@ -645,7 +659,7 @@ class Page{
 					($comment['userId']==-1?' <i>guest post</i>':'').
 					' <span class="commentDate">('.date('l, F jS, Y',$timestamp).' at '.date('g:i:s A T',$timestamp).')</span>'.
 					'<p>'.$bbParser->parse($comment['content'],explode(',',$comment['allowedTags'])).'</p>'.
-					($canComment?'<a href="'.$comment['id'].'" class="reply">Reply</a>':'').
+					($canComment?'<a href="'.$comment['id'].'" class="reply" data-quick="false">Reply</a>':'').
 				'</div>';
 	}
 	private function getComments($pid,$canComment,$refId = -1,$depth = 0){
@@ -770,7 +784,8 @@ class Page{
 	}
 	public function getPageFromSQL($pathPartsParsed,$lang,$id){
 		global $bbParser,$user_info,$sql,$security;
-		$p = $sql->query("SELECT ts,content_%s,title_%s,settings,id FROM pages WHERE id=%d",[$lang,$lang,$id],0);
+		$getParams = 'ts,content_'.$lang.',title_'.$lang.',settings,id';
+		$p = $sql->query("SELECT $getParams FROM pages WHERE id=%d",[$id],0);
 		if($p['id']==1){ // index
 			$bbParser->addTag('news',function($type,$s,$attrs,$bbParser){
 				global $sql;
@@ -791,7 +806,7 @@ class Page{
 				$pathPartsParsed = explode('/',$this->getPathFromId((int)$p['content_'.$lang]));
 				$pathPartsParsed[] = 'index'; // for <base>
 				array_shift($pathPartsParsed); // get rid of first empty element
-				$p = $sql->query("SELECT $getParams FROM pages WHERE id=%d",[$lang,$lang,(int)$p['content_'.$lang]],0);
+				$p = $sql->query("SELECT $getParams FROM pages WHERE id=%d",[(int)$p['content_'.$lang]],0);
 			}
 			$html = $bbParser->parse($p['content_'.$lang],['*']);
 			if($security->isLoggedIn() && $user_info['power']&4){
@@ -1189,7 +1204,7 @@ switch($pathPartsParsed[0]){
 				$pageHTML = '<h2>Analytics</h2><table class="statstable"><tr><th>Month</th><th>Hits</th><th>Pages</th><th>Visits</th></tr>';
 				
 				for($i=0;$i<sizeof($hits);$i++){
-					$date = DateTime::createFromFormat('n Y',$hits[$i]['month'].' '.$hits[$i]['year']);
+					$date = DateTime::createFromFormat('n Y j',$hits[$i]['month'].' '.$hits[$i]['year'].' 1');
 					$pageHTML .= '<tr><td><a href="/analytics?m='.$hits[$i]['month'].'&y='.$hits[$i]['year'].'">'.$date->format('F Y').'</a></td><td>'.
 									(array_key_exists($i,$hitsnb)?$hitsnb[$i]['c']:0).'/'.(array_key_exists($i,$hits)?$hits[$i]['c']:0).'</td><td>'.
 									(array_key_exists($i,$filesnb)?$filesnb[$i]['c']:0).'/'.(array_key_exists($i,$files)?$files[$i]['c']:0).'</td><td>'.
@@ -1246,14 +1261,45 @@ switch($pathPartsParsed[0]){
 		if(isset($pathPartsParsed[1])){
 			switch($pathPartsParsed[1]){
 				case 'key':
-					$user = $sql->query("SELECT randkey,power FROM users WHERE id='%s'",[$_GET['i']],0);
+					$user = $sql->query("SELECT randkey,power,name FROM users WHERE id='%s'",[$_GET['i']],0);
 					$pageHTML = '';
 					if(isset($user['randkey']) && $user['randkey']==$_GET['k']){
 						if(!$user['power']&1){
 							$user['power'] = ((int)$user['power']|1);
 							$pageHTML='Activated account, now you can <a href="/account/login">log in</a>.';
+							$sql->query("UPDATE users SET randkey='',power='%s' WHERE id='%s'",[$user['power'],$_GET['i']]);
+						}else{
+							$pageHTML = 'Password recovery for <b>'.$user['name'].'</b><br>'.
+								'<form id="create">Password:<input type="password" name="pwd"><br>'.
+								'Again Password:<input type="password" name="pwd2"><br><input type="submit" value="change password"></form><div id="output"></div>'.
+								'<script type="text/javascript">'.
+									'$("#create").submit(function(e){'.
+										'e.preventDefault();'.
+										'if($("#create [name=\\"pwd\\"]").val()!=$("#create [name=\\"pwd2\\"]").val()){'.
+											'$("#output").text("ERROR: Passwords don\'t match!");'.
+										'}else{'.
+											'$("#output").text("fetching keys...");'.
+											'$.getJSON("/getKeys?norelog").done(function(keys){'.
+												'$.getScript("/jsencrypt.min.js?norelog",function(){'.
+													'$("#output").text("encrypting password...");'.
+													'var encrypt = new JSEncrypt();'.
+													'encrypt.setPublicKey(atob(keys.hash.key));'.
+													'var encrypted = encrypt.encrypt($(\'#create [name="pwd"]\').val());'.
+													'$("#output").text("sending information...");'.
+													'$.post("/account/verifyForgotPwd?norelog&k='.$_GET['k'].'&i='.$_GET['i'].'",{'.
+														'id:keys.hash.id,'.
+														'fkey:keys.form.key,'.
+														'fid:keys.form.id,'.
+														'pwd:encrypted'.
+													'}).done(function(data){'.
+														'$("#output").text(data);'.
+													'});'.
+												'});'.
+											'});'.
+										'}'.
+									'});'.
+								'</script>';
 						}
-						$sql->query("UPDATE users SET randkey='',power='%s' WHERE id='%s'",[$user['power'],$_GET['i']]);
 					}else{
 						$pageHTML='<b>ERROR</b> invalid key</b>';
 					}
@@ -1374,6 +1420,54 @@ switch($pathPartsParsed[0]){
 					if(!mail($_POST['email'],'Verify your www.sorunome.de account',$mailMessage,'From: Sorunome.de Bot <bot@sorunome.de>'))
 						die('Error sending verification email');
 					echo 'Sent verification email, please check your spam folder!';
+					break;
+				case 'forgotPwd':
+					if(!isset($_GET['email'])){
+						die('ERROR: missing email');
+					}
+					$user = $sql->query("SELECT id,name,email FROM users WHERE LOWER(email)=LOWER('%s')",[$_GET['email']],0);
+					if($user['id'] === NULL){
+						die('ERROR: user not found');
+					}
+					$randkey = $security->generateRandomString(50);
+					$sql->query("UPDATE `users` SET `randkey`='%s' WHERE `id`=%d",[$randkey,$user['id']]);
+					$mailMessage = implode([
+						'Hey there '.$user['name'].',',
+						'',
+						'You requested to reset your password. To do so follow the link below:',
+						'http://www.sorunome.de/account/key?i='.$user['id'].'&k='.$randkey,
+						'If you didn\'t request password recovery just ignore this email.',
+						'',
+						'Cheers, Sorunome.de Bot'
+						],"\n");
+					if(!mail($user['email'],'Password recovery of your www.sorunome.de account',$mailMessage,'From: Sorunome.de Bot <bot@sorunome.de>')){
+						die('Error sending recovery email');
+					}
+					echo 'Sent recovery email, please check your spam folder!';
+					break;
+				case 'verifyForgotPwd':
+					case 'key':
+					$user = $sql->query("SELECT randkey,power,name FROM users WHERE id=%d",[(int)$_GET['i']],0);
+					$pageHTML = '';
+					if(isset($user['randkey']) && $user['randkey']==$_GET['k'] && $user['power']&1){
+						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fkey']) || !isset($_POST['fid'])){
+							die('ERROR: Missing required field');
+						}
+						$pwd = $security->getPwdFromKey($_POST['id'],$_POST['pwd']);
+						if(strlen($pwd)<1){
+							die('ERROR: No password entered!');
+						}
+						if(!$security->validateForm($_POST['fid'],$_POST['fkey'])){
+							die('ERROR: Invalid session, please refresh the page');
+						}
+						$salt = Password::generateSalt(50);
+						$hSalt = $security->hash($salt,$vars->get('private_salt_key')); // we register and thus use the newest hash method
+						$hash = $security->hash($pwd,$hSalt);
+						$sql->query("UPDATE `users` SET `passwd`='%s',`salt`='%s',`randkey`='',`passwdtype`=%d WHERE `id`=%d",[$hash,$salt,$security->getNewestPwdType(),(int)$_GET['i']]);
+						echo 'Updated password, you can now log in';
+					}else{
+						die('User not found/invalid key/that stuff');
+					}
 					break;
 				default:
 					$page->getPageFromSQL($pathPartsParsed,$lang,$page->getIdFromSQL($pathPartsParsed));
