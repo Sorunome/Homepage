@@ -628,7 +628,7 @@ class Page{
 			}
 		}else{
 			if((int)$settings & 1){
-				header('Content-Type: text/json');
+				header('Content-Type: application/json');
 				$basePath = $this->getBasePath($pathPartsParsed);
 				$quicklinksHTML = $this->getQuickLinks($lang,$pathPartsParsed);
 				if(strtolower($pathPartsParsed[sizeof($pathPartsParsed)-1])=='index'){
@@ -946,7 +946,7 @@ class Edit{
 	}
 	public function saveOrder($data){
 		global $security,$user_info,$page,$vars,$lang,$pathPartsParsed,$sql;
-		header('Content-Type: text/json');
+		header('Content-Type: application/json');
 		if($security->isLoggedIn() && $user_info['power']&16){
 			$json = json_decode($data,true);
 			if($json!==NULL){
@@ -966,7 +966,7 @@ class Edit{
 	}
 	public function deleteStructure($id){
 		global $security,$user_info,$sql,$vars,$page,$lang;
-		header('Content-Type: text/json');
+		header('Content-Type: application/json');
 		if($security->isLoggedIn() && $user_info['power']&16){
 			$p = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d",[(int)$id],0);
 			if($p['id']!==NULL){
@@ -982,7 +982,7 @@ class Edit{
 	}
 	public function saveStructure($id,$data){
 		global $security,$user_info,$sql,$vars,$page,$lang;
-		header('Content-Type: text/json');
+		header('Content-Type: application/json');
 		if($security->isLoggedIn() && $user_info['power']&16){
 			if(isset($data['name']) && isset($data['title_en']) && isset($data['settings'])){
 				$p = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d",[(int)$id],0);
@@ -1146,7 +1146,7 @@ if($security->isLoggedIn()){ // grab user info
 	$user_info = $sql->query("SELECT session,name,settings,power,id FROM users WHERE id=%d",[(int)$_SESSION['id']],0);
 }elseif(!isset($_GET['norelog']) && isset($_COOKIE['shouldlogin'])&&$_COOKIE['shouldlogin']=='true'&&!$security->isLoggedIn()){
 	if(isset($_GET['hps'])){
-		header('Content-Type: text/json');
+		header('Content-Type: application/json');
 		echo json_encode([
 			'relogin' => true
 		]);
@@ -1224,7 +1224,7 @@ switch($pathPartsParsed[0]){
 		echo $page->getPage('Analytics',$pageHTML,$lang,$pathPartsParsed);
 		break;
 	case 'getKeys':
-		header('Content-type: text/json');
+		header('Content-type: application/json');
 		echo $security->makeKeysJSON();
 		break;
 	case 'comment':
@@ -1318,7 +1318,7 @@ switch($pathPartsParsed[0]){
 						'</script>',$lang,$pathPartsParsed);
 					break;
 				case 'verifyLogin':
-					header('Content-type: text/json');
+					header('Content-type: application/json');
 					if(isset($_GET['ltpwdv'])){
 						if(!isset($_POST['pwd']) || !isset($_POST['id']) || !isset($_POST['fid']) || !isset($_POST['fkey']) || !isset($_POST['uid']))
 							die('{"success":false}');
@@ -1481,7 +1481,7 @@ switch($pathPartsParsed[0]){
 		if(isset($pathPartsParsed[1])){
 			switch($pathPartsParsed[1]){
 				case 'getBB':
-					header('Content-type: text/json');
+					header('Content-type: application/json');
 					$p = $sql->query("SELECT content_$lang,id FROM pages WHERE id='%s'",[$_GET['p']],0);
 					if($security->isLoggedIn() && $user_info['power']&4){
 						if($p['id'] !== NULL){
@@ -1497,7 +1497,7 @@ switch($pathPartsParsed[0]){
 					}
 					break;
 				case 'savePage':
-					header('Content-type: text/json');
+					header('Content-type: application/json');
 					if($security->isLoggedIn() && $user_info['power']&4){
 						$sql->query("UPDATE pages SET content_$lang='%s' WHERE id='%s'",[$_POST['c'],$_GET['p']]);
 						echo('{"success":true,"message":"success"}');
@@ -1525,7 +1525,7 @@ switch($pathPartsParsed[0]){
 					if(isset($_POST['data'])){
 						$edit->saveOrder($_POST['data']);
 					}else{
-						header('Content-Type: text/json');
+						header('Content-Type: application/json');
 						echo '{"success":false,"msg":"missing required fields"}';
 					}
 					break;
