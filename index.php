@@ -1,4 +1,4 @@
-<?php
+<?hh
 ini_set('display_errors',1);
 ini_set('display_startup_errors',1);
 error_reporting(-1);
@@ -261,7 +261,7 @@ class Analytics{
 				'Total Visits: '.$this->getData(10,$m,$y,'c').'/'.$this->getData(3,$m,$y,'c').'<br>'.
 				'<br>'.$this->getAllTables($m,$y);
 	}
-	public function run(){
+	public async function run(): Awaitable<void>{
 		global $user_info,$fileExtention,$security,$otherPages;
 		$this->query = '';
 		$this->params = [];
@@ -1676,4 +1676,3 @@ switch($pathPartsParsed[0]){
 		}
 		break;
 }
-?>
