@@ -95,6 +95,13 @@ $bbParser->addTag('instruction',function($type,$s,$attrs,$bbParser){
 	}
 	return '<div id="instructionInstructionMain"></div><script type="text/javascript" src="http://www.sorunome.de/webdeveloping/instruction/?id='.$s.'&idPrev=instruction&js"></script>';
 },[],'makes an instruction');
+$bbParser->addTag('block',function($type,$s,$attrs,$bbParser){
+	$class = 'block';
+	if(isset($attrs['class']) && preg_match('/^[0-9a-zA-Z_-+]+$/',$attrs['class'])){
+		$class .= ' '.$attrs['class'];
+	}
+	return '<div style="display:inline-block;margin:0.5em;padding:0.5em" class="'.$class.'">'.$bbParser->parse($s).'</div>';
+},['class'],'Defines a block');
 $bbParser->addTag('nobbc',function($type,$s,$attrs,$bbParser){
 	return htmlspecialchars($s);
 },[],'Escapes bb-code');

@@ -204,7 +204,7 @@ class bbParser {
 				$newS = str_replace("\n",'<br>',$newS);
 			}
 		}
-		
+		$newS = "\r\b\r".$newS;
 		$newS = str_replace("\r\b\r<br>",'',$newS); // remove unneeded <br>'s
 		$newS = str_replace("\r\b\r",'',$newS); // remove any extra control characters
 		

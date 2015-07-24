@@ -49,6 +49,7 @@ Power
 8 - view analytics
 16 - edit page structure
 32 - view reuben3
+64 - sysadmin
 */
 
 class Security{
@@ -605,13 +606,14 @@ class Page{
 		return '<nav>'.$this->createNavHTML($navJSON['inner']).'</nav>';
 	}
 	public function cacheHeaders($s){
-		if(isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) && strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) >= filemtime($s)){
+		$lastModified = filemtime($s);
+		$ifModifiedSince = (isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) ? $_SERVER['HTTP_IF_MODIFIED_SINCE'] : false);
+		header('Last-Modified: '.gmdate('D, d M Y H:i:s',$lastModified).' GMT');
+		header('Cache-Control: public');
+		if(strtolower($_SERVER['HTTP_CACHE_CONTROL']) != 'no-cache' && (@strtotime($ifModifiedSince) == $lastModified)){
 			header('HTTP/1.0 304 Not Modified');
 			exit;
 		}
-		header('Last-Modified: Sun, 27 Oct 2013 15:25:47 GMT');
-		header('Expires: '.date('D, d M Y H:i:s e',strtotime('30 days')));
-		header('Cache-Control: max-age=2592000');
 	}
 	public function getPage($title,$content,$lang,$pathPartsParsed,$settings = 1,$id = 0){
 		global $sql,$security,$startTime;
@@ -888,44 +890,25 @@ class Edit{
 		$t = '';
 		$btns = ' <a class="structureUp">^</a> <a class="structureDown">v</a>';
 		
-		$first1 = true;
-		$first2 = true;
 		foreach($obj as $o){
 			if(($o['settings'] & 16)==1){
 				$s .= '<li>'.$o['name'].'</li>';
 			}else{
 				if($o['settings']&2){
-					if($first1){
-						$moreBtns = '';
-					}else{
-						$moreBtns = ' <a class="structureRight">&gt;</a>';
-					}
-					if($refId!=1){
-						$moreBtns = ' <a class="structureLeft">&lt;</a>'.$moreBtns;
-					}
-					
+					$moreBtns = ' <a class="structureLeft">&lt;</a> <a class="structureRight">&gt;</a>';
 					if($o['id']!==NULL){
-						$t .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$moreBtns.$this->createStructureHTML($o['inner'],$o['id']).'</li>';
+						$t .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$btns.$moreBtns.$this->createStructureHTML($o['inner'],$o['id']).'</li>';
 					}else{
 						$t .= '<li>'.$o['name'].'</a>'.$this->createStructureHTML($o['inner'],-1).'</li>';
 					}
-					$first1 = false;
 				}else{
-					if($first2){
-						$moreBtns = '';
-					}else{
-						$moreBtns = ' <a class="structureRight">&gt;</a>';
-					}
-					if($refId!=1){
-						$moreBtns = ' <a class="structureLeft">&lt;</a>'.$moreBtns;
-					}
+					$moreBtns = ' <a class="structureLeft">&lt;</a> <a class="structureRight">&gt;</a>';
 					
 					if($o['id']!==NULL){
 						$s .= '<li data-id="'.$o['id'].'"><a href="/edit/structure?pid='.$o['id'].'">'.$o['name'].'</a>'.$btns.$moreBtns.$this->createStructureHTML($o['inner'],$o['id']).'</li>';
 					}else{
-						$s .= '<li>'.$o['name'].'</a>'.$btns.$this->createStructureHTML($o['inner'],-1).'</li>';
+						$s .= '<li>'.$o['name'].'</a>'.$this->createStructureHTML($o['inner'],-1).'</li>';
 					}
-					$first2 = false;
 				}
 			}
 		}
@@ -1000,6 +983,27 @@ class Edit{
 			echo '{"success":false,"msg":"permission denied"}';
 		}
 	}
+	public function saveParent($p,$e){
+		global $security,$user_info,$sql,$vars,$page,$lang;
+		header('Content-Type: application/json');
+		if($security->isLoggedIn() && $user_info['power']&16){
+			if($p == (int)$p && $e == (int)$e){
+				$pids = $sql->query("SELECT `id` FROM `pages` WHERE `id`=%d OR `id`=%d",[$p,$e]);
+				if(sizeof($pids) >= 2){
+					$newSorder = $sql->query("SELECT MAX(`sorder`)+1 as `n` FROM `pages` WHERE `refId`=%d",[$p],0);
+					$sql->query("UPDATE `pages` SET `refId`=%d,`sorder`=%d WHERE `id`=%d",[$p,$newSorder['n'],$e]);
+					$vars->set('cache_nav_'.$lang,$page->createNav());
+					echo '{"success":true}';
+				}else{
+					echo '{"success":false,"msg":"page not found"}';
+				}
+			}else{
+				echo '{"success":false,"msg":"invalid page"}';
+			}
+		}else{
+			echo '{"success":false,"msg":"permission denied"}';
+		}
+	}
 	public function dispStructure(){
 		global $security,$user_info,$page,$vars,$lang,$pathPartsParsed,$sql;
 		if($security->isLoggedIn() && $user_info['power']&16){
@@ -1061,7 +1065,12 @@ class Edit{
 				echo $page->getPage('Edit Page Structure',$pageHTML,$lang,$pathPartsParsed);
 			}else{
 				$navJSON = $vars->get('cache_nav_'.$lang);
-				$pageHTML = '<div>'.$this->createStructureHTML($navJSON['inner']).'</div>'.
+				$pageHTML = '<div id="editStructure">'.$this->createStructureHTML($navJSON['inner']).'</div>'.
+					'<style type="text/css">'.
+						'#editStructure > ul > li > a.structureLeft,#editStructure ul > li:first-child > a.structureRight{'.
+							'display:none;'.
+						'}'.
+					'</style>'.
 					'<script type="text/javascript">'.
 						'(function(){'.
 							'var saveStructure = function($elem){'.
@@ -1080,10 +1089,17 @@ class Edit{
 											'alert("Error Saving: "+(data.msg!==undefined?data.msg:""));'.
 										'}'.
 									'});'.
+								'},'.
+								'newParent = function($p,$e){'.
+									'homepage.post("/edit/saveparent?p="+$p.attr("data-id")+"&e="+$e.attr("data-id"),function(data){'.
+										'if(!data.success){'.
+											'alert("Error Saving: "+(data.msg!==undefined?data.msg:""));'.
+										'}'.
+									'});'.
 								'};'.
 							'$(".structureUp").click(function(e){'.
 								'e.preventDefault();'.
-								'$elem = $(this).parent();'.
+								'var $elem = $(this).parent();'.
 								'if($elem.prev().length != 0){'.
 									'$elem.prev().before($elem);'.
 									'saveStructure($elem.parent().parent());'.
@@ -1091,13 +1107,36 @@ class Edit{
 							'});'.
 							'$(".structureDown").click(function(e){'.
 								'e.preventDefault();'.
-								'$elem = $(this).parent();'.
+								'var $elem = $(this).parent();'.
 								'if($elem.next().length != 0){'.
 									'$elem.next().after($elem);'.
 									'saveStructure($elem.parent().parent());'.
 								'}'.
 							'});'.
-							
+							'$(".structureLeft").click(function(e){'.
+								'e.preventDefault();'.
+								'var $elem = $(this).parent(),'.
+									'$parentElem = $elem.parent().parent().parent().parent();'.
+								'if($parentElem.is("li")){'.
+									'$elem.appendTo($parentElem.children("ul")[0]);'.
+									'$elem.prev().before($elem);'.
+									'newParent($parentElem,$elem);'.
+								'}'.
+							'});'.
+							'$(".structureRight").click(function(e){'.
+								'e.preventDefault();'.
+								'var $elem = $(this).parent(),'.
+									'$newParent = $elem.prev();'.
+								'if($elem.prev().length != 0 && $newParent.is("li")){'.
+									'console.log("can move up");'.
+									'if($newParent.find("ul").length == 0){'.
+										'$newParent.append($("<ul>").append($("<a>").text("+ New").attr("href","/edit/new?refid="+$newParent.attr("data-id"))));'.
+									'}'.
+									'$elem.appendTo($newParent.find("ul"));'.
+									'$elem.prev().before($elem);'.
+									'newParent($newParent,$elem);'.
+								'}'.
+							'});'.
 						'})();'.
 					'</script>';
 				echo $page->getPage('Edit Structure',$pageHTML,$lang,$pathPartsParsed);
@@ -1524,6 +1563,14 @@ switch($pathPartsParsed[0]){
 				case 'saveorder':
 					if(isset($_POST['data'])){
 						$edit->saveOrder($_POST['data']);
+					}else{
+						header('Content-Type: application/json');
+						echo '{"success":false,"msg":"missing required fields"}';
+					}
+					break;
+				case 'saveparent':
+					if(isset($_GET['p']) && isset($_GET['e'])){
+						$edit->saveParent($_GET['p'],$_GET['e']);
 					}else{
 						header('Content-Type: application/json');
 						echo '{"success":false,"msg":"missing required fields"}';

@@ -63,7 +63,7 @@ class Sql{
 				if($i++>=1000)
 					break;
 			}
-			if($res === []){
+			if($res === array()){
 				$fields = $result->fetch_fields();
 				for($i=0;$i<count($fields);$i++)
 					$res[$fields[$i]->name] = NULL;
